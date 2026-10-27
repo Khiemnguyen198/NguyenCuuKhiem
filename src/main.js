@@ -96,7 +96,7 @@ document.querySelector('#app').innerHTML = `
         <button class="nav__item" data-page="Lịch sử"><i class="ph ph-clock-counter-clockwise"></i><span>Lịch sử</span></button>
         <button class="nav__item" data-page="Cấu hình"><i class="ph ph-gear-six"></i><span>Cấu hình</span></button>
       </nav>
-      <div class="sidebar__foot"><span class="status-dot"></span>SQLite đang hoạt động</div>
+      <div class="sidebar__foot"><span class="status-dot"></span>${isStaticPages ? 'Lưu trên trình duyệt' : 'SQLite đang hoạt động'}</div>
     </aside>
 
     <main class="main">
@@ -125,7 +125,7 @@ document.querySelector('#app').innerHTML = `
         </div>
         <div class="file-history-grid">
           <section class="file-history-card file-history-card--delivered">
-            <header><span class="history-icon"><i class="ph ph-paper-plane-tilt"></i></span><div><h3>Lịch sử giao file</h3><p>Các file kết quả đã gửi đi</p></div><span class="history-count" id="deliveredBadge">0</span></header>
+            <header><span class="history-icon"><i class="ph ph-paper-plane-tilt"></i></span><div><h3>Lịch sử giao file</h3><p>Các file được xác nhận đã giao</p></div><span class="history-count" id="deliveredBadge">0</span></header>
             <div class="file-history-list" id="deliveredFiles"></div>
           </section>
           <section class="file-history-card file-history-card--processed">
@@ -309,6 +309,39 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
 }
 
+function fileAction(file) {
+  if (file.id === 'demo-original') return '<span class="history-row__status">Mẫu</span>';
+  const category = file.category === 'original' ? 'processed' : file.category === 'processed' ? 'delivered' : null;
+  if (!category) return '<span class="history-row__status">Đã giao</span>';
+  const done = fileHistoryState.some((item) => item.category === category && item.importId === file.importId);
+  const label = category === 'processed' ? 'Đánh dấu đã xử lý' : 'Đánh dấu đã giao';
+  return done ? '<span class="history-row__status">Đã ghi nhận</span>' : `<button class="history-action" data-file-id="${escapeHtml(file.id)}" data-category="${category}" aria-label="${label}: ${escapeHtml(file.filename)}">${label}</button>`;
+}
+
+function saveBrowserFiles(files) {
+  localStorage.setItem('planner-file-history', JSON.stringify(files.filter((file) => file.id !== 'demo-original')));
+}
+
+async function markFile(fileId, category) {
+  const file = fileHistoryState.find((item) => String(item.id) === fileId);
+  if (!file || file.id === 'demo-original') throw new Error('Không tìm thấy file đã nhập.');
+  const expected = file.category === 'original' ? 'processed' : file.category === 'processed' ? 'delivered' : null;
+  if (category !== expected) throw new Error('Trạng thái file không hợp lệ.');
+  if (isStaticPages) {
+    if (!fileHistoryState.some((item) => item.importId === file.importId && item.category === category)) {
+      const files = [{ ...file, id: crypto.randomUUID(), category, createdAt: new Date().toISOString(), note: category === 'processed' ? 'Người dùng xác nhận đã xử lý.' : 'Người dùng xác nhận đã giao.' }, ...fileHistoryState];
+      saveBrowserFiles(files);
+      renderFileHistory(files);
+    }
+  } else {
+    const response = await fetch('/api/files', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileId: file.id, category }) });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Không thể cập nhật file.');
+    renderFileHistory(payload.files);
+  }
+  showToast(category === 'processed' ? 'Đã ghi nhận file đã xử lý.' : 'Đã ghi nhận file đã giao.');
+}
+
 function fileRow(file) {
   const meta = [file.rowCount ? `${formatNumber.format(file.rowCount)} dòng` : null, file.totalQuantity ? `${formatNumber.format(file.totalQuantity)} sản phẩm` : null].filter(Boolean).join(' • ');
   const safeFilename = escapeHtml(file.filename);
@@ -316,7 +349,7 @@ function fileRow(file) {
     <article class="history-row">
       <span class="history-row__icon"><i class="ph ph-file-xls"></i></span>
       <div class="history-row__body"><strong title="${safeFilename}">${safeFilename}</strong><span>${escapeHtml(meta || file.note || 'File sản xuất')}</span><small>${escapeHtml(formatFileDate(file.createdAt))}</small></div>
-      <button class="history-row__menu" aria-label="Xem chi tiết ${safeFilename}"><i class="ph ph-dots-three-vertical"></i></button>
+      ${fileAction(file)}
     </article>
   `;
 }
@@ -325,7 +358,7 @@ function renderFileHistory(files = fileHistoryState) {
   fileHistoryState = files;
   const groups = {
     delivered: files.filter((file) => file.category === 'delivered'),
-    processed: files.filter((file) => file.category === 'processed'),
+    processed: files.filter((file) => file.category === 'processed' && !files.some((event) => event.category === 'delivered' && event.importId === file.importId)),
     original: files.filter((file) => file.category === 'original')
   };
   for (const [category, items] of Object.entries(groups)) {
@@ -337,6 +370,10 @@ function renderFileHistory(files = fileHistoryState) {
 
 async function loadFileHistory() {
   if (isStaticPages) {
+    try {
+      const stored = JSON.parse(localStorage.getItem('planner-file-history') || '[]');
+      if (Array.isArray(stored) && stored.length) fileHistoryState = stored;
+    } catch { showToast('Không thể đọc lịch sử trong trình duyệt.', 'error'); }
     renderFileHistory(fileHistoryState);
     return;
   }
@@ -468,6 +505,15 @@ async function loadDashboard() {
   }
 }
 
+document.querySelector('#overviewView').addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-file-id]');
+  if (!button) return;
+  button.disabled = true;
+  try { await markFile(button.dataset.fileId, button.dataset.category); }
+  catch (error) { showToast(error.message, 'error'); }
+  finally { button.disabled = false; }
+});
+
 document.querySelector('#importButton').addEventListener('click', () => document.querySelector('#fileInput').click());
 document.querySelector('#fileInput').addEventListener('change', async (event) => {
   const file = event.target.files?.[0];
@@ -489,8 +535,10 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
     };
     if (isStaticPages) {
       renderDashboard(localPayload);
-      fileHistoryState = [{ id: `browser-${Date.now()}`, category: 'original', filename: file.name, createdAt: new Date().toISOString(), rowCount: rows.length, totalQuantity: localPayload.totalQuantity, note: 'File gốc được giữ nguyên trong trình duyệt.' }, ...fileHistoryState.filter((item) => item.filename !== file.name)];
-      renderFileHistory(fileHistoryState);
+      const importId = crypto.randomUUID();
+      const files = [{ id: importId, importId, category: 'original', filename: file.name, createdAt: new Date().toISOString(), rowCount: rows.length, totalQuantity: localPayload.totalQuantity, note: 'Chỉ lưu thông tin file; file Excel gốc không bị thay đổi.' }, ...fileHistoryState.filter((item) => item.id !== 'demo-original')];
+      saveBrowserFiles(files);
+      renderFileHistory(files);
       showToast(`Đã đọc ${formatNumber.format(localPayload.rowCount)} dòng. Bản web công khai không lưu SQLite.`, 'info');
       return;
     }

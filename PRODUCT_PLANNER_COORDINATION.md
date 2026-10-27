@@ -29,13 +29,16 @@ Always pull `master` before editing. Do not treat the GPT Sites deployment as th
 - Required-machine calculation with capacity gap.
 - Planning dashboard and responsive layout.
 - Overview with three real-data groups: delivered files, processed files, and untouched originals.
+- User-confirmed processed and delivered events with timestamps; originals are retained and duplicate actions are ignored.
+- Static builds persist file metadata and status history in browser storage; Node development persists events in SQLite.
 - GitHub Pages deployment workflow.
 - Production builds use browser storage for capacity settings and browser-only workbook import on static hosting, including GPT Sites at the root URL.
 
 ## Current limitations
 
 - Minute and machine results remain unset until the user enters company standards.
-- No workflow action yet marks an original as processed or delivered; those lists remain empty until real events are implemented.
+- Marking a file as processed/delivered records a user-confirmed status only; it does not edit, generate, or send a workbook.
+- Browser history is local to the current browser and does not store workbook bytes or sync across devices.
 - The GPT Sites URL must be republished or synchronized separately after repository changes.
 
 ## Coordination protocol

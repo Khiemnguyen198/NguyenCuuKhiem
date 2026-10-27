@@ -235,3 +235,11 @@ button.metric { border-top: 0; border-bottom: 0; border-left: 0; text-align: lef
   .calculation-preview > div { padding-bottom: 10px; border-right: 0; border-bottom: 1px solid #cee5dd; }
   .calculation-preview > div:last-child { padding-bottom: 0; border-bottom: 0; }
 }
+
+.history-row { grid-template-columns: 34px minmax(0, 1fr); }
+.history-action, .history-row__status { grid-column: 2; justify-self: start; font-size: 10px; }
+.history-action { border: 1px solid #b9e4d6; border-radius: 5px; padding: 7px 9px; color: #08785b; background: #effaf6; cursor: pointer; }
+.history-action:hover { background: #dbf4e9; }
+.history-action:focus-visible { outline: 2px solid #08785b; outline-offset: 2px; }
+.history-action:disabled { opacity: .6; cursor: wait; }
+.history-row__status { color: #74879a; }

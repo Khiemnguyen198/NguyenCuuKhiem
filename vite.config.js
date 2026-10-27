@@ -180,18 +180,31 @@ function sqliteApi() {
         }
       });
 
-      server.middlewares.use('/api/files', (request, response) => {
-        if (request.method !== 'GET') return sendJson(response, 405, { error: 'Method not allowed' });
-        const files = database.prepare(`
-          SELECT h.id, h.category, h.filename, h.created_at AS createdAt, h.note,
+      server.middlewares.use('/api/files', async (request, response) => {
+        const listFiles = () => database.prepare(`
+          SELECT h.id, h.import_id AS importId, h.category, h.filename, strftime('%Y-%m-%dT%H:%M:%fZ', h.created_at) AS createdAt, h.note,
                  i.row_count AS rowCount, i.total_quantity AS totalQuantity,
                  i.total_impressions AS totalImpressions
           FROM file_history h
           LEFT JOIN imports i ON i.id = h.import_id
           ORDER BY h.created_at DESC, h.id DESC
-          LIMIT 100
         `).all();
-        return sendJson(response, 200, { files });
+        if (request.method === 'GET') return sendJson(response, 200, { files: listFiles() });
+        if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
+        try {
+          const { fileId, category } = JSON.parse(await readBody(request));
+          const file = database.prepare('SELECT * FROM file_history WHERE id = ?').get(fileId ?? null);
+          if (!file) return sendJson(response, 404, { error: 'Không tìm thấy file.' });
+          const expected = file.category === 'original' ? 'processed' : file.category === 'processed' ? 'delivered' : null;
+          if (!expected || category !== expected) return sendJson(response, 400, { error: 'Trạng thái file không hợp lệ.' });
+          database.prepare(`
+            INSERT OR IGNORE INTO file_history(import_id, category, filename, note)
+            VALUES (?, ?, ?, ?)
+          `).run(file.import_id, category, file.filename, category === 'processed' ? 'Người dùng xác nhận đã xử lý.' : 'Người dùng xác nhận đã giao.');
+          return sendJson(response, 200, { files: listFiles() });
+        } catch (error) {
+          return sendJson(response, 400, { error: error.message || 'Không thể cập nhật file.' });
+        }
       });
 
       server.middlewares.use('/api/imports', async (request, response) => {
