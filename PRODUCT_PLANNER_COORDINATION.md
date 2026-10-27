@@ -30,6 +30,7 @@ Always pull `master` before editing. Do not treat the GPT Sites deployment as th
 - Planning dashboard and responsive layout.
 - Overview with three real-data groups: delivered files, processed files, and untouched originals.
 - GitHub Pages deployment workflow.
+- Production builds use browser storage for capacity settings and browser-only workbook import on static hosting, including GPT Sites at the root URL.
 
 ## Current limitations
 

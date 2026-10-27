@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import './styles.css';
 
 const formatNumber = new Intl.NumberFormat('vi-VN');
-const isStaticPages = import.meta.env.BASE_URL !== '/';
+const isStaticPages = import.meta.env.PROD || import.meta.env.BASE_URL !== '/';
 
 const fallbackDashboard = {
   source: 'demo',
