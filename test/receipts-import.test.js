@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as XLSX from 'xlsx';
-import { readReceiptsSheet, summarizeReceipts } from '../src/receipts-import.js';
+import { compactReceiptLines, readReceiptsSheet } from '../src/receipts-import.js';
 
 test('reads the DATA sheet of the receiving log and totals each product', () => {
   const header = ['NGÀY NHẬN', 'CODE', 'KHÁCH HÀNG', 'WEB', 'RẬP', 'SỐ CHI TIẾT', 'MÃ HÀNG', 'MÀU', 'PO', 'SS', 'SLHĐ', 'SLHĐ TỔNG', 'GROUP SIZE', 'BÀN', 'TỔNG NHẬN', 'S', 'M', 'NGÀY XUẤT', 'TỔNG XUẤT'];
@@ -15,19 +15,16 @@ test('reads the DATA sheet of the receiving log and totals each product', () => 
   assert.equal(lines.length, 2);
   assert.deepEqual([lines[0].date, lines[0].received, lines[1].shipped], ['2026-10-26', 600, 380]);
 
-  const products = summarizeReceipts(lines);
-  assert.deepEqual([...products.keys()], ['332690|BLUE']);
-  const product = products.get('332690|BLUE');
-  assert.deepEqual([product.received, product.shipped, product.receipts, product.firstDate, product.lastDate], [1000, 380, 2, '2026-10-26', '2026-10-27']);
+  assert.equal(lines[1].color, 'BLUE');
 });
 
-test('compacted receipt lines summarize to the same totals', async () => {
-  const { compactReceiptLines } = await import('../src/receipts-import.js');
+test('compacts receipts per product, season and ticket', () => {
   const lines = [
-    { date: '2026-10-24', model: 'A', color: 'B', received: 10, shipped: 0, contractTotal: 30 },
-    { date: '2026-10-26', model: 'A', color: 'B', received: 15, shipped: 5, contractTotal: 30 }
+    { date: '2026-10-24', model: 'A', color: 'B', season: 'SS27', po: '73377', received: 10, shipped: 0 },
+    { date: '2026-10-26', model: 'A', color: 'B', season: 'SS27', po: '73377', received: 15, shipped: 5 },
+    { date: '2026-10-26', model: 'A', color: 'B', season: 'SS27', po: '73400', received: 7, shipped: 0 }
   ];
   const compact = compactReceiptLines(lines);
-  assert.equal(compact.length, 1);
-  assert.deepEqual(summarizeReceipts(compact).get('A|B'), summarizeReceipts(lines).get('A|B'));
+  assert.equal(compact.length, 2);
+  assert.deepEqual([compact[0].received, compact[0].shipped, compact[0].receipts, compact[0].firstDate, compact[0].date], [25, 5, 2, '2026-10-24', '2026-10-26']);
 });

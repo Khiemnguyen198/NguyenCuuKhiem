@@ -10,8 +10,9 @@ import { escapeHtml, formatFileDate, formatNumber } from './format.js';
 import { readJson, writeJson } from './storage.js';
 import { appTemplate } from './template.js';
 import { PAGE_SIZE, matchesFilters, renderCustomerRows, renderKpis, renderModelRows } from './models-view.js';
-import { readWarehouseWorkbook, summarizeWarehouse } from './warehouse-import.js';
-import { compactReceiptLines, readReceiptsWorkbook, summarizeReceipts } from './receipts-import.js';
+import { readWarehouseWorkbook } from './warehouse-import.js';
+import { compactReceiptLines, readReceiptsWorkbook } from './receipts-import.js';
+import { restrictToRows, summarizeLots, totalsOf } from './lots.js';
 import { renderLeadtimeRows, renderWarnings } from './progress-view.js';
 import { downloadFromLink } from './sources.js';
 import { buildExportWorkbook, downloadWorkbook, exportFilename, sortByUrgency } from './export-workbook.js';
@@ -442,6 +443,8 @@ async function applyStandardToPlan(standard, updateDefault = true) {
 
 const EMPTY_SOURCE = { filename: null, origin: null, importedAt: null, lines: [] };
 const sourceState = { receipts: { ...EMPTY_SOURCE }, deliveries: { ...EMPTY_SOURCE } };
+// Lots of the whole booking (FIFO-filled), and the view of them the page shows (maybe one batch).
+let lotSummary = null;
 let warehouseSummary = null;
 const modelFilters = { customer: '', status: 'open', query: '' };
 let expandedModelKey = null;
@@ -456,7 +459,7 @@ function sourceMeta(source, detail) {
 function renderSources() {
   const booking = latestBooking.source === 'demo' ? null : latestBooking;
   document.querySelector('#sourceMeta-booking').innerHTML = booking
-    ? sourceMeta({ filename: booking.filename, importedAt: booking.importedAt || booking.createdAt }, `${formatNumber.format(booking.rowCount)} dòng · ${formatNumber.format(booking.models?.length || 0)} mã hàng`)
+    ? sourceMeta({ filename: booking.filename, importedAt: booking.importedAt || booking.createdAt }, `${formatNumber.format(booking.rowCount)} dòng · ${formatNumber.format(lotSummary ? lotSummary.items.filter((item) => !item.outsideBooking).length : 0)} lô`)
     : '<span class="muted">Đang hiện dữ liệu mẫu</span>';
   const receiptCount = sourceState.receipts.lines.reduce((sum, line) => sum + (line.receipts ?? 1), 0);
   document.querySelector('#sourceMeta-receipts').innerHTML = sourceMeta(sourceState.receipts, `${formatNumber.format(receiptCount)} lần nhận`);
@@ -464,17 +467,23 @@ function renderSources() {
 }
 
 function renderWarehouse() {
+  lotSummary = summarizeLots({
+    bookingRows: bookingDetail.rows,
+    deliveryLines: sourceState.deliveries.lines,
+    receiptLines: sourceState.receipts.lines
+  });
+  // Built after the FIFO pass so batch copies of the rows carry their allocated figures.
   const booking = activeBooking();
   renderBatchOptions();
-  warehouseSummary = summarizeWarehouse(sourceState.deliveries.lines, {
-    bookingModels: booking.models || [],
-    receipts: sourceState.receipts.lines.length ? summarizeReceipts(sourceState.receipts.lines) : null,
-    batchMode: Boolean(booking.batch)
-  });
+  const inBatch = (row) => booking.batch.dayIndexes.some((index) => String(index) in (row.allocations || {}));
+  const viewItems = booking.batch
+    ? [...restrictToRows(lotSummary.items, inBatch), ...lotSummary.items.filter((item) => item.outsideBooking)]
+    : lotSummary.items;
+  warehouseSummary = { items: viewItems, ...totalsOf(viewItems) };
   const { items, totals, customers } = warehouseSummary;
   const names = [sourceState.receipts.filename && `nhận: ${sourceState.receipts.filename}`, sourceState.deliveries.filename && `giao: ${sourceState.deliveries.filename}`].filter(Boolean);
   document.querySelector('#warehouseMeta').textContent = names.length
-    ? `${names.join(' · ')} · ${formatNumber.format(items.length)} mã hàng của ${formatNumber.format(customers.length)} khách`
+    ? `${names.join(' · ')} · ${formatNumber.format(items.length - totals.outside)} lô booking · ${formatNumber.format(totals.outside)} mã ngoài booking`
     : 'Chưa có dữ liệu nhận/giao. Nhập ở mục Tổng quan → Nguồn dữ liệu.';
   document.querySelector('#modelKpis').innerHTML = renderKpis(totals, { batch: Boolean(booking.batch) });
   const select = document.querySelector('#customerFilter');
@@ -550,25 +559,28 @@ function renderOverview() {
   document.querySelector('#overviewMeta').textContent = latestBooking.source === 'demo'
     ? 'Đang hiện booking mẫu. Nhập file booking thật ở mục Nguồn dữ liệu.'
     : booking.batch
-      ? `${booking.batch.label}: ${formatNumber.format(booking.rowCount)} dòng, ${formatNumber.format(booking.totalQuantity)} sản phẩm phân bổ trong đợt · SL hợp đồng = số lượng của đợt.`
+      ? `${booking.batch.label}: ${formatNumber.format(booking.rowCount)} dòng booking phân bổ trong đợt · nhận/giao chia cho từng dòng theo hạn giao (FIFO).`
       : `Booking: ${latestBooking.filename} · số nhận/giao lấy từ file nhận và file giao mới nhất.`;
 }
 
+// Plan pages show the lots of the newest booking; older imports have no row detail to match.
 function renderPlanProgress() {
-  document.querySelector('#planLeadtimeBody').innerHTML = renderLeadtimeRows(dashboardState, warehouseSummary);
-  const keys = new Set((dashboardState.models || []).map((model) => `${model.model}|${model.color}`));
-  const matched = (warehouseSummary?.items || []).filter((item) => item.sources.booking && keys.has(`${item.model}|${item.color}`));
-  const sum = (field) => matched.reduce((total, item) => total + item[field], 0);
-  document.querySelector('#planReceived').textContent = matched.length ? formatNumber.format(sum('received')) : '—';
-  document.querySelector('#planGood').textContent = matched.length ? formatNumber.format(sum('good')) : '—';
-  const meta = matched.length ? `${formatNumber.format(matched.filter((item) => item.received > 0).length)} / ${formatNumber.format(keys.size)} mã đã nhận BTP` : 'Chưa có số liệu nhận/giao';
-  document.querySelector('#planReceivedMeta').textContent = meta;
-  document.querySelector('#planGoodMeta').textContent = matched.length ? `${formatNumber.format(matched.filter((item) => item.status === 'done').length)} mã giao đủ` : 'Chưa có số liệu nhận/giao';
+  const isLatest = String(dashboardState.importId) === String(latestBooking.importId);
+  const lots = isLatest ? (lotSummary?.items || []).filter((item) => !item.outsideBooking) : [];
+  document.querySelector('#planLeadtimeBody').innerHTML = renderLeadtimeRows(dashboardState, isLatest ? { items: lots } : null);
+  const sum = (field) => lots.reduce((total, item) => total + item[field], 0);
+  const hasActual = lots.some((item) => item.received || item.delivered);
+  document.querySelector('#planReceived').textContent = hasActual ? formatNumber.format(sum('received')) : '—';
+  document.querySelector('#planGood').textContent = hasActual ? formatNumber.format(sum('delivered')) : '—';
+  document.querySelector('#planReceivedMeta').textContent = hasActual
+    ? `${formatNumber.format(lots.filter((item) => item.received > 0).length)} / ${formatNumber.format(lots.length)} lô đã nhận BTP`
+    : isLatest ? 'Chưa có số liệu nhận/giao' : 'Chỉ tính cho booking mới nhất';
+  document.querySelector('#planGoodMeta').textContent = hasActual ? `${formatNumber.format(lots.filter((item) => item.status === 'done').length)} lô giao đủ` : '—';
 }
 
 function renderModelTable() {
   if (!warehouseSummary) return;
-  const scoped = warehouseSummary.items.filter((item) => matchesFilters(item, { ...modelFilters, status: 'all' }));
+  const scoped = warehouseSummary.items.filter((item) => matchesFilters(item, { ...modelFilters, status: 'any' }));
   const filtered = sortByUrgency(scoped.filter((item) => matchesFilters(item, modelFilters)));
   document.querySelector('#customerBody').innerHTML = renderCustomerRows(
     warehouseSummary.items.filter((item) => matchesFilters(item, { query: modelFilters.query, status: 'all' })),
@@ -579,7 +591,7 @@ function renderModelTable() {
     badge.textContent = formatNumber.format(scoped.filter((item) => matchesFilters(item, { status: badge.dataset.statusCount })).length);
   });
   document.querySelectorAll('#statusFilters [data-status]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.status === modelFilters.status)));
-  document.querySelector('#modelCount').textContent = `Hiển thị ${formatNumber.format(Math.min(modelLimit, filtered.length))} / ${formatNumber.format(filtered.length)} mã hàng`;
+  document.querySelector('#modelCount').textContent = `Hiển thị ${formatNumber.format(Math.min(modelLimit, filtered.length))} / ${formatNumber.format(filtered.length)} ${modelFilters.status === 'outside' ? 'mã ngoài booking' : 'lô'}`;
   document.querySelector('#showMoreModels').hidden = filtered.length <= modelLimit;
 }
 
@@ -648,19 +660,8 @@ async function exportSummary() {
   if (!warehouseSummary) throw new Error('Chưa có dữ liệu để xuất.');
   const booking = activeBooking();
   const filename = exportFilename(new Date(), booking.batch);
-  const change = changesState.find((item) => String(item.importId) === String(latestBooking.importId)) || null;
-  const workbook = buildExportWorkbook({
-    summary: warehouseSummary,
-    dashboard: booking,
-    booking,
-    aiReport: latestAiReport,
-    change,
-    sources: [
-      { title: 'Booking', filename: latestBooking.source === 'demo' ? null : latestBooking.filename, importedAt: latestBooking.importedAt },
-      { title: 'Nhận', ...sourceState.receipts },
-      { title: 'Giao', ...sourceState.deliveries }
-    ]
-  });
+  if (!booking.rows?.length) throw new Error('Chưa có dữ liệu booking chi tiết. Nhập lại file booking trước khi xuất.');
+  const workbook = buildExportWorkbook({ booking, lots: lotSummary.items });
   downloadWorkbook(workbook, filename);
   // The export is the "processed" result of the newest booking file.
   const original = fileHistoryState.find((file) => file.category === 'original' && String(file.importId) === String(latestBooking.importId));

@@ -51,16 +51,16 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel }) {
         </section>
         <section class="delivery-summary">
           <div class="leadtime-summary__head"><strong>Theo khách hàng</strong><span>Nhấn vào một khách hàng để xem các mã hàng của họ</span></div>
-          <div class="table-wrap table-wrap--scroll"><table class="delivery-table"><thead><tr><th>Khách hàng</th><th>Số mã</th><th>SL hợp đồng</th><th>Đã nhận</th><th>Giao đạt</th><th>Lỗi</th><th>Còn phải giao</th><th>Hoàn thành</th></tr></thead><tbody id="customerBody"></tbody></table></div>
+          <div class="table-wrap table-wrap--scroll"><table class="delivery-table"><thead><tr><th>Khách hàng</th><th>Số lô</th><th>SLHĐ tổng</th><th>Đã nhận</th><th>Giao đạt</th><th>Lỗi</th><th>Còn phải giao</th><th>Hoàn thành</th></tr></thead><tbody id="customerBody"></tbody></table></div>
         </section>
         <section class="delivery-summary">
           <div class="model-filters">
-            <label class="model-search"><i class="ph ph-magnifying-glass"></i><input id="modelSearch" type="search" placeholder="Tìm mã hàng, màu, khách hàng…" /></label>
+            <label class="model-search"><i class="ph ph-magnifying-glass"></i><input id="modelSearch" type="search" placeholder="Tìm mã hàng, model, màu, số phiếu…" /></label>
             <select data-batch-select aria-label="Chọn đợt booking"></select>
             <select id="customerFilter" aria-label="Lọc theo khách hàng"><option value="">Tất cả khách hàng</option></select>
             <div class="status-filters" id="statusFilters" role="group" aria-label="Lọc theo trạng thái">${STATUS_FILTERS.map(([value, label]) => `<button type="button" data-status="${value}"${value === 'open' ? ' aria-pressed="true"' : ''}>${label}<span data-status-count="${value}"></span></button>`).join('')}</div>
           </div>
-          <div class="table-wrap"><table class="delivery-table model-table"><thead><tr><th>Khách hàng</th><th class="th-left">Mã hàng</th><th class="th-left">Màu</th><th>SL hợp đồng</th><th>Đã nhận</th><th>Đã in (giao)</th><th>Giao đạt</th><th>Lỗi</th><th>Còn thiếu</th><th>Hoàn thành</th><th>Hạn giao</th><th>Trạng thái</th></tr></thead><tbody id="modelBody"></tbody></table></div>
+          <div class="table-wrap"><table class="delivery-table model-table"><thead><tr><th>Khách hàng</th><th class="th-left">Mã hàng</th><th class="th-left">Model</th><th class="th-left">Màu</th><th>Mùa</th><th>SLHĐ tổng</th><th>Đã nhận</th><th>Đã in (giao)</th><th>Giao đạt</th><th>Lỗi</th><th>Còn thiếu</th><th>Hoàn thành</th><th>Hạn giao</th><th>Trạng thái</th></tr></thead><tbody id="modelBody"></tbody></table></div>
           <div class="model-table__foot"><span id="modelCount"></span><button class="secondary-button" id="showMoreModels" hidden>Xem thêm</button></div>
         </section>
       </section>
@@ -82,7 +82,7 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel }) {
           <div class="warning-strip" id="overviewWarnings"></div>
           <div class="leadtime-summary">
             <div class="leadtime-summary__head"><strong>Theo leadtime booking</strong><span>Đã nhận / giao đạt là lũy kế theo mã hàng · Nhà máy làm Thứ 2–Thứ 7</span></div>
-            <div class="table-wrap"><table class="delivery-table"><thead><tr><th>Leadtime</th><th class="th-left">Khách hàng</th><th>Số mã</th><th>Số hợp đồng</th><th>Tổng đơn hàng</th><th>Ngày nhận (INPUT)</th><th>Hạn giao (OUTPUT)</th><th>Đã nhận BTP</th><th>Giao đạt</th><th class="th-left">Tình trạng mã</th></tr></thead><tbody id="overviewLeadtimeBody"></tbody></table></div>
+            <div class="table-wrap"><table class="delivery-table"><thead><tr><th>Leadtime</th><th class="th-left">Khách hàng</th><th>Số mã</th><th>Số hợp đồng</th><th>Tổng đơn hàng</th><th>Ngày nhận (INPUT)</th><th>Hạn giao (OUTPUT)</th><th>Đã nhận BTP</th><th>Đã in (giao)</th><th class="th-left">Tình trạng lô</th></tr></thead><tbody id="overviewLeadtimeBody"></tbody></table></div>
           </div>
         </section>
         <div class="overview-intro">
@@ -167,14 +167,14 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel }) {
             <div class="metric"><strong id="totalQuantity">—</strong><span>Booking yêu cầu</span><small id="rowCount">— dòng booking</small></div>
             <div class="metric"><strong id="totalImpressions">—</strong><span>Lượt hình cần in</span><small>Từ file booking</small></div>
             <div class="metric"><strong id="planReceived">—</strong><span>Đã nhận BTP</span><small id="planReceivedMeta">Các mã trong file này</small></div>
-            <div class="metric"><strong id="planGood">—</strong><span>Giao đạt</span><small id="planGoodMeta">Các mã trong file này</small></div>
+            <div class="metric"><strong id="planGood">—</strong><span>Đã in (giao)</span><small id="planGoodMeta">Các mã trong file này</small></div>
           </section>
 
           <section class="capacity-panel">
             <div class="section-heading">
               <div><p class="section-heading__overline">ĐỐI CHIẾU KẾ HOẠCH</p><h2>Tiến độ theo leadtime</h2></div>
             </div>
-            <div class="table-wrap"><table class="delivery-table"><thead><tr><th>Leadtime</th><th class="th-left">Khách hàng</th><th>Số mã</th><th>Số hợp đồng</th><th>Tổng đơn hàng</th><th>Ngày nhận (INPUT)</th><th>Hạn giao (OUTPUT)</th><th>Đã nhận BTP</th><th>Giao đạt</th><th class="th-left">Tình trạng mã</th></tr></thead><tbody id="planLeadtimeBody"></tbody></table></div>
+            <div class="table-wrap"><table class="delivery-table"><thead><tr><th>Leadtime</th><th class="th-left">Khách hàng</th><th>Số mã</th><th>Số hợp đồng</th><th>Tổng đơn hàng</th><th>Ngày nhận (INPUT)</th><th>Hạn giao (OUTPUT)</th><th>Đã nhận BTP</th><th>Đã in (giao)</th><th class="th-left">Tình trạng lô</th></tr></thead><tbody id="planLeadtimeBody"></tbody></table></div>
             <div class="calculation-note"><i class="ph ph-info"></i><span>Đã nhận và giao đạt lấy từ file nhận / file giao mới nhất, cộng dồn theo mã hàng + màu.</span></div>
           </section>
         </div>

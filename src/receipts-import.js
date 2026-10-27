@@ -1,6 +1,5 @@
 import * as XLSX from 'xlsx';
 import { toIsoDate } from './booking-import.js';
-import { productKey } from './keys.js';
 
 // Receiving log ("INKAVA_XUẤT NHẬP BTP", sheet DATA): one row per delivery of
 // semi-finished goods into the factory, with received / shipped totals by size.
@@ -75,35 +74,22 @@ export function readReceiptsSheet(sheet) {
 
 const isIsoDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value));
 
-// Totals per product (model + color), keyed like the warehouse summary.
-export function summarizeReceipts(lines = []) {
-  const products = new Map();
+// Browser storage is about 5 MB, so the static site keeps one line per product, season and
+// ticket (PO column) instead of every receipt.
+export function compactReceiptLines(lines) {
+  const groups = new Map();
   for (const line of lines) {
-    const key = productKey(line.model, line.color);
-    const product = products.get(key) || {
-      model: line.model, color: line.color, customer: line.customer, season: line.season,
-      received: 0, shipped: 0, receipts: 0, contractTotal: 0, firstDate: null, lastDate: null
-    };
-    product.received += line.received;
-    product.shipped += line.shipped;
-    product.receipts += line.receipts ?? 1;
-    product.contractTotal = Math.max(product.contractTotal, line.contractTotal);
-    // Compacted lines (see compactReceiptLines) carry their own first date.
+    const key = [line.model, line.color, line.season, line.po].map((value) => String(value ?? '').trim().toUpperCase()).join('|');
+    const group = groups.get(key) || { ...line, received: 0, shipped: 0, receipts: 0, firstDate: null, date: null };
+    group.received += line.received || 0;
+    group.shipped += line.shipped || 0;
+    group.receipts += line.receipts ?? 1;
     for (const date of [line.firstDate, line.date]) {
       if (!isIsoDate(date)) continue;
-      if (!product.firstDate || date < product.firstDate) product.firstDate = date;
-      if (!product.lastDate || date > product.lastDate) product.lastDate = date;
+      if (!group.firstDate || date < group.firstDate) group.firstDate = date;
+      if (!group.date || date > group.date) group.date = date;
     }
-    products.set(key, product);
+    groups.set(key, group);
   }
-  return products;
-}
-
-// Browser storage is about 5 MB, so the static site keeps one line per product instead of every receipt.
-export function compactReceiptLines(lines) {
-  return [...summarizeReceipts(lines).values()].map((product) => ({
-    date: product.lastDate, firstDate: product.firstDate, customer: product.customer, model: product.model,
-    color: product.color, season: product.season, contractTotal: product.contractTotal,
-    received: product.received, shipped: product.shipped, receipts: product.receipts
-  }));
+  return [...groups.values()].map(({ table, contractQuantity, ...line }) => line);
 }
