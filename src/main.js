@@ -2,6 +2,7 @@ import '@phosphor-icons/web/regular';
 import * as XLSX from 'xlsx';
 import './styles.css';
 import { analyzeBookingRows } from './local-ai.js';
+import { normalizeStandardRows } from './config-ai.js';
 
 const formatNumber = new Intl.NumberFormat('vi-VN');
 const isStaticPages = import.meta.env.PROD || import.meta.env.BASE_URL !== '/';
@@ -29,6 +30,9 @@ const defaultSettings = {
 let dashboardState = fallbackDashboard;
 let settingsState = { ...defaultSettings };
 let activeImportId = fallbackDashboard.importId;
+let standardsState = [];
+let selectedStandardId = null;
+let standardEditConfirmed = false;
 let fileHistoryState = [{
   id: 'demo-original',
   importId: 'demo-plan',
@@ -148,6 +152,48 @@ document.querySelector('#app').innerHTML = `
           <section class="file-history-card file-history-card--original">
             <header><span class="history-icon"><i class="ph ph-file-lock"></i></span><div><h3>File gốc chưa chỉnh sửa</h3><p>Bản tải lên được bảo toàn</p></div><span class="history-count" id="originalBadge">0</span></header>
             <div class="file-history-list" id="originalFiles"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="config-view" id="configView" hidden>
+        <div class="config-intro">
+          <div><p class="section-heading__overline">ĐỊNH MỨC SẢN XUẤT</p><h2>Danh mục thời gian chuẩn</h2><p>Nhập Excel hoặc tạo thủ công. AI local sẽ chuẩn hóa dữ liệu để dùng cho kế hoạch.</p></div>
+          <div class="config-actions">
+            <button class="secondary-button" id="addStandard"><i class="ph ph-plus"></i>Nhập thủ công</button>
+            <button class="primary-button" id="importStandards"><i class="ph ph-file-xls"></i>Nhập Excel cấu hình</button>
+            <input id="standardsFileInput" type="file" accept=".xlsx,.xls" hidden />
+          </div>
+        </div>
+        <div class="config-workspace">
+          <aside class="standard-library">
+            <div class="standard-library__head"><div><strong>Danh mục định mức</strong><span id="standardsCount">0 cấu hình</span></div><label><i class="ph ph-magnifying-glass"></i><input id="standardSearch" type="search" placeholder="Tìm Oval 18…" /></label></div>
+            <div class="standard-list" id="standardList"></div>
+          </aside>
+          <section class="standard-detail">
+            <div class="standard-detail__empty" id="standardEmpty"><i class="ph ph-sliders-horizontal"></i><strong>Chọn một định mức</strong><span>Thông tin đầy đủ sẽ hiển thị tại đây.</span></div>
+            <form id="standardForm" hidden>
+              <header class="standard-detail__head">
+                <div><div class="standard-source" id="standardSource">NHẬP THỦ CÔNG</div><h3 id="standardTitle">Định mức mới</h3><p id="standardUpdated">Chưa lưu</p></div>
+                <span class="lock-state" id="standardLockState"><i class="ph ph-lock-key"></i>Đang khóa</span>
+              </header>
+              <fieldset id="standardFields" disabled>
+                <label class="field-wide"><span>Tên định mức / mã kiểu</span><input name="name" required placeholder="Ví dụ: Oval 18" /></label>
+                <label><span>Phút / lượt hình</span><input name="minutesPerImpression" type="number" min="0.0001" step="0.0001" required /></label>
+                <label><span>Phút setup / PO</span><input name="setupMinutesPerPo" type="number" min="0" step="0.1" /></label>
+                <label><span>Số máy</span><input name="machineCount" type="number" min="1" step="1" /></label>
+                <label><span>Số ca / ngày</span><input name="shiftsPerDay" type="number" min="1" step="1" /></label>
+                <label><span>Phút / ca</span><input name="minutesPerShift" type="number" min="1" step="1" /></label>
+                <label><span>Hiệu suất (%)</span><input name="efficiencyPercent" type="number" min="1" max="100" step="0.1" /></label>
+                <label><span>Số ngày kế hoạch</span><input name="planningDays" type="number" min="1" max="6" step="1" /></label>
+                <label class="field-wide"><span>Ghi chú</span><textarea name="note" rows="3" placeholder="Thông tin bổ sung…"></textarea></label>
+              </fieldset>
+              <footer class="standard-detail__footer">
+                <button type="button" class="secondary-button" id="unlockStandard"><i class="ph ph-lock-key-open"></i>Mở khóa để sửa</button>
+                <button type="submit" class="primary-button" id="saveStandard" hidden><i class="ph ph-floppy-disk"></i>Lưu thay đổi</button>
+                <button type="button" class="apply-standard" id="applyStandard"><i class="ph ph-check-circle"></i>Dùng để tính kế hoạch</button>
+              </footer>
+            </form>
           </section>
         </div>
       </section>
@@ -419,25 +465,161 @@ async function loadFileHistory() {
   }
 }
 
+function saveBrowserStandards(standards) {
+  localStorage.setItem('planner-production-standards', JSON.stringify(standards));
+}
+
+function standardRow(standard) {
+  return `
+    <button class="standard-row${String(standard.id) === String(selectedStandardId) ? ' standard-row--active' : ''}" data-standard-id="${escapeHtml(standard.id)}">
+      <span class="standard-row__icon"><i class="ph ph-timer"></i></span>
+      <span class="standard-row__copy"><strong>${escapeHtml(standard.name)}</strong><small>${formatNumber.format(standard.minutesPerImpression)} phút / lượt hình</small></span>
+      ${standard.isDefault ? '<span class="default-badge">Mặc định</span>' : ''}
+      <i class="ph ph-caret-right"></i>
+    </button>
+  `;
+}
+
+function renderStandardList(query = '') {
+  const normalized = query.trim().toLocaleLowerCase('vi-VN');
+  const standards = standardsState.filter((standard) => standard.name.toLocaleLowerCase('vi-VN').includes(normalized));
+  document.querySelector('#standardsCount').textContent = `${formatNumber.format(standardsState.length)} cấu hình`;
+  document.querySelector('#standardList').innerHTML = standards.length
+    ? standards.map(standardRow).join('')
+    : '<div class="standard-list-empty"><i class="ph ph-folder-open"></i><strong>Chưa có định mức</strong><span>Nhập Excel hoặc tạo cấu hình thủ công.</span></div>';
+}
+
+function setStandardEditable(editable) {
+  document.querySelector('#standardFields').disabled = !editable;
+  document.querySelector('#unlockStandard').hidden = editable;
+  document.querySelector('#saveStandard').hidden = !editable;
+  const lock = document.querySelector('#standardLockState');
+  lock.innerHTML = editable ? '<i class="ph ph-lock-key-open"></i>Đang chỉnh sửa' : '<i class="ph ph-lock-key"></i>Đang khóa';
+  lock.dataset.unlocked = editable ? 'true' : 'false';
+}
+
+function selectStandard(id) {
+  const standard = standardsState.find((item) => String(item.id) === String(id));
+  if (!standard) return;
+  selectedStandardId = standard.id;
+  standardEditConfirmed = false;
+  document.querySelector('#standardEmpty').hidden = true;
+  const form = document.querySelector('#standardForm');
+  form.hidden = false;
+  for (const [name, value] of Object.entries(standard)) {
+    if (form.elements[name]) form.elements[name].value = value ?? '';
+  }
+  document.querySelector('#standardTitle').textContent = standard.name;
+  document.querySelector('#standardSource').textContent = standard.source === 'excel' ? `EXCEL · ${standard.sourceFilename || 'FILE CẤU HÌNH'}` : 'NHẬP THỦ CÔNG';
+  document.querySelector('#standardUpdated').textContent = standard.updatedAt ? `Cập nhật ${formatFileDate(standard.updatedAt)}` : 'Chưa lưu';
+  document.querySelector('#applyStandard').innerHTML = standard.isDefault
+    ? '<i class="ph ph-check-circle"></i>Đang dùng để tính kế hoạch'
+    : '<i class="ph ph-check-circle"></i>Dùng để tính kế hoạch';
+  document.querySelector('#applyStandard').disabled = Boolean(standard.isDefault);
+  setStandardEditable(Boolean(standard.isDraft));
+  renderStandardList(document.querySelector('#standardSearch').value);
+}
+
+async function loadStandards() {
+  try {
+    if (isStaticPages) {
+      const stored = JSON.parse(localStorage.getItem('planner-production-standards') || '[]');
+      standardsState = Array.isArray(stored) ? stored : [];
+    } else {
+      const response = await fetch('/api/standards');
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Không thể đọc danh mục định mức.');
+      standardsState = payload.standards;
+    }
+    renderStandardList();
+    if (standardsState.length) selectStandard(standardsState.find((item) => item.isDefault)?.id || standardsState[0].id);
+    else {
+      document.querySelector('#standardForm').hidden = true;
+      document.querySelector('#standardEmpty').hidden = false;
+    }
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+
+function standardFromForm() {
+  const form = document.querySelector('#standardForm');
+  const numberValue = (name) => form.elements[name].value === '' ? null : Number(form.elements[name].value);
+  return {
+    id: selectedStandardId,
+    name: form.elements.name.value.trim(),
+    minutesPerImpression: numberValue('minutesPerImpression'),
+    setupMinutesPerPo: numberValue('setupMinutesPerPo'),
+    machineCount: numberValue('machineCount'),
+    shiftsPerDay: numberValue('shiftsPerDay'),
+    minutesPerShift: numberValue('minutesPerShift'),
+    efficiencyPercent: numberValue('efficiencyPercent'),
+    planningDays: numberValue('planningDays'),
+    note: form.elements.note.value.trim()
+  };
+}
+
+function bestStandardSheet(workbook) {
+  let best = { standards: [], mapping: {}, ignoredRows: 0, confidence: 'low', sheetName: '' };
+  for (const sheetName of workbook.SheetNames) {
+    for (let range = 0; range < 8; range += 1) {
+      const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { range, defval: null, raw: true });
+      const candidate = { ...normalizeStandardRows(rows), sheetName };
+      if (candidate.standards.length > best.standards.length) best = candidate;
+    }
+  }
+  return best;
+}
+
+async function saveImportedStandards(standards, sourceFilename) {
+  if (isStaticPages) {
+    const existing = standardsState.filter((item) => !standards.some((incoming) => incoming.name.toLocaleLowerCase('vi-VN') === item.name.toLocaleLowerCase('vi-VN')));
+    const imported = standards.map((standard, index) => ({
+      ...standard, id: crypto.randomUUID(), source: 'excel', sourceFilename,
+      isDefault: index === 0, locked: true, updatedAt: new Date().toISOString()
+    }));
+    standardsState = [...imported, ...existing.map((item) => ({ ...item, isDefault: false }))];
+    saveBrowserStandards(standardsState);
+  } else {
+    const response = await fetch('/api/standards', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ standards, source: 'excel', sourceFilename, makeDefault: true })
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Không thể lưu file cấu hình.');
+    standardsState = payload.standards;
+  }
+  renderStandardList();
+  const active = standardsState.find((item) => item.isDefault) || standardsState[0];
+  selectStandard(active.id);
+  await applyStandardToPlan(active, false);
+}
+
 function showPage(pageName) {
   const isOverview = pageName === 'Tổng quan';
   const isPlanList = pageName === 'Kế hoạch';
+  const isConfig = pageName === 'Cấu hình';
   document.querySelector('#overviewView').hidden = !isOverview;
   document.querySelector('#planListView').hidden = !isPlanList;
+  document.querySelector('#configView').hidden = !isConfig;
   document.querySelector('#planningView').hidden = true;
   document.querySelector('#backToPlans').hidden = true;
-  document.querySelector('#pageEyebrow').textContent = isOverview ? 'QUẢN LÝ FILE' : 'DANH SÁCH KẾ HOẠCH';
-  document.querySelector('#pageTitle').textContent = isOverview ? 'Tổng quan' : 'Kế hoạch';
+  document.querySelector('#importButton').hidden = isConfig;
+  document.querySelector('#pageEyebrow').textContent = isOverview ? 'QUẢN LÝ FILE' : isConfig ? 'THÔNG SỐ & ĐỊNH MỨC' : 'DANH SÁCH KẾ HOẠCH';
+  document.querySelector('#pageTitle').textContent = isOverview ? 'Tổng quan' : isConfig ? 'Cấu hình' : 'Kế hoạch';
   if (isOverview) loadFileHistory();
   if (isPlanList) loadFileHistory();
+  if (isConfig) loadStandards();
 }
 
 async function openPlanDetail(importId = null) {
   activeImportId = importId || fallbackDashboard.importId;
   document.querySelector('#overviewView').hidden = true;
   document.querySelector('#planListView').hidden = true;
+  document.querySelector('#configView').hidden = true;
   document.querySelector('#planningView').hidden = false;
   document.querySelector('#backToPlans').hidden = false;
+  document.querySelector('#importButton').hidden = false;
   document.querySelector('#pageEyebrow').textContent = 'KẾ HOẠCH SẢN XUẤT';
   document.querySelector('#pageTitle').textContent = 'Điều phối kế hoạch';
   await loadDashboard(importId);
@@ -578,6 +760,44 @@ async function loadSettings() {
   }
 }
 
+async function persistSettings(settings) {
+  if (isStaticPages) {
+    localStorage.setItem('planner-settings', JSON.stringify(settings));
+    settingsState = settings;
+  } else {
+    const response = await fetch('/api/settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings)
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Không thể lưu cấu hình.');
+    settingsState = payload;
+  }
+  renderMachineCalculation();
+}
+
+async function applyStandardToPlan(standard, updateDefault = true) {
+  const fields = ['minutesPerImpression', 'setupMinutesPerPo', 'machineCount', 'shiftsPerDay', 'minutesPerShift', 'efficiencyPercent', 'planningDays'];
+  const settings = { ...defaultSettings, ...settingsState };
+  fields.forEach((field) => {
+    if (standard[field] != null && standard[field] !== '') settings[field] = Number(standard[field]);
+  });
+  await persistSettings(settings);
+  if (updateDefault) {
+    if (isStaticPages) {
+      standardsState = standardsState.map((item) => ({ ...item, isDefault: String(item.id) === String(standard.id) }));
+      saveBrowserStandards(standardsState);
+    } else {
+      const response = await fetch('/api/standards', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: standard.id, setDefault: true })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Không thể đặt cấu hình mặc định.');
+      standardsState = payload.standards;
+    }
+    selectStandard(standard.id);
+  }
+}
+
 let toastTimer;
 function showToast(message, type = 'success') {
   const toast = document.querySelector('#toast');
@@ -695,10 +915,106 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
 document.querySelectorAll('.nav__item').forEach((item) => item.addEventListener('click', () => {
   document.querySelectorAll('.nav__item').forEach((navItem) => navItem.classList.remove('nav__item--active'));
   item.classList.add('nav__item--active');
-  if (item.dataset.page === 'Cấu hình') openSettings();
-  else if (item.dataset.page === 'Tổng quan' || item.dataset.page === 'Kế hoạch') showPage(item.dataset.page);
+  if (item.dataset.page === 'Tổng quan' || item.dataset.page === 'Kế hoạch' || item.dataset.page === 'Cấu hình') showPage(item.dataset.page);
   else showToast(`${item.dataset.page} đang được hoàn thiện trong bản test.`, 'info');
 }));
+
+document.querySelector('#standardList').addEventListener('click', (event) => {
+  const row = event.target.closest('[data-standard-id]');
+  if (row) selectStandard(row.dataset.standardId);
+});
+document.querySelector('#standardSearch').addEventListener('input', (event) => renderStandardList(event.target.value));
+document.querySelector('#addStandard').addEventListener('click', () => {
+  const draft = {
+    id: `draft-${Date.now()}`, name: '', minutesPerImpression: null,
+    setupMinutesPerPo: settingsState.setupMinutesPerPo, machineCount: settingsState.machineCount,
+    shiftsPerDay: settingsState.shiftsPerDay, minutesPerShift: settingsState.minutesPerShift,
+    efficiencyPercent: settingsState.efficiencyPercent, planningDays: settingsState.planningDays,
+    note: '', source: 'manual', isDefault: false, isDraft: true
+  };
+  standardsState = [draft, ...standardsState.filter((item) => !item.isDraft)];
+  renderStandardList();
+  selectStandard(draft.id);
+  document.querySelector('#standardForm').elements.name.focus();
+});
+document.querySelector('#importStandards').addEventListener('click', () => document.querySelector('#standardsFileInput').click());
+document.querySelector('#standardsFileInput').addEventListener('change', async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const button = document.querySelector('#importStandards');
+  button.disabled = true;
+  button.innerHTML = '<i class="ph ph-spinner-gap spin"></i>AI đang chuẩn hóa';
+  try {
+    const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+    const result = bestStandardSheet(workbook);
+    if (!result.standards.length) throw new Error('AI local chưa tìm thấy cột tên định mức và số phút trong file.');
+    await saveImportedStandards(result.standards, file.name);
+    showToast(`AI đã chuẩn hóa ${formatNumber.format(result.standards.length)} định mức từ sheet ${result.sheetName}.`);
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    button.disabled = false;
+    button.innerHTML = '<i class="ph ph-file-xls"></i>Nhập Excel cấu hình';
+    event.target.value = '';
+  }
+});
+document.querySelector('#unlockStandard').addEventListener('click', () => {
+  const standard = standardsState.find((item) => String(item.id) === String(selectedStandardId));
+  if (!standard) return;
+  const confirmed = window.confirm(`Bạn có chắc muốn chỉnh sửa “${standard.name}”? Thay đổi định mức có thể làm thay đổi kết quả tính kế hoạch.`);
+  if (!confirmed) return;
+  standardEditConfirmed = true;
+  setStandardEditable(true);
+  document.querySelector('#standardForm').elements.name.focus();
+});
+document.querySelector('#standardForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const standard = standardFromForm();
+  const current = standardsState.find((item) => String(item.id) === String(selectedStandardId));
+  const submit = event.submitter;
+  submit.disabled = true;
+  try {
+    if (isStaticPages) {
+      const saved = { ...current, ...standard, id: current?.isDraft ? crypto.randomUUID() : current.id, isDraft: false, locked: true, updatedAt: new Date().toISOString() };
+      standardsState = standardsState.map((item) => String(item.id) === String(selectedStandardId) ? saved : item);
+      if (!standardsState.some((item) => item.isDefault)) saved.isDefault = true;
+      saveBrowserStandards(standardsState);
+      selectedStandardId = saved.id;
+    } else {
+      const isDraft = Boolean(current?.isDraft);
+      const response = await fetch('/api/standards', {
+        method: isDraft ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(isDraft
+          ? { standards: [standard], source: 'manual', makeDefault: !standardsState.some((item) => !item.isDraft && item.isDefault) }
+          : { ...standard, confirmed: standardEditConfirmed })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Không thể lưu định mức.');
+      standardsState = payload.standards;
+      selectedStandardId = standardsState.find((item) => item.name.toLocaleLowerCase('vi-VN') === standard.name.toLocaleLowerCase('vi-VN'))?.id;
+    }
+    standardEditConfirmed = false;
+    renderStandardList();
+    selectStandard(selectedStandardId);
+    const savedStandard = standardsState.find((item) => String(item.id) === String(selectedStandardId));
+    if (savedStandard?.isDefault) await applyStandardToPlan(savedStandard, false);
+    showToast('Đã lưu và khóa lại định mức.');
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    submit.disabled = false;
+  }
+});
+document.querySelector('#applyStandard').addEventListener('click', async () => {
+  const standard = standardsState.find((item) => String(item.id) === String(selectedStandardId));
+  if (!standard) return;
+  try {
+    await applyStandardToPlan(standard);
+    showToast(`Đã dùng “${standard.name}” làm cấu hình tính kế hoạch.`);
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+});
 
 document.querySelector('#planFiles').addEventListener('click', (event) => {
   const plan = event.target.closest('[data-plan-id]');
@@ -721,18 +1037,7 @@ document.querySelector('#settingsForm').addEventListener('submit', async (event)
   const submit = event.submitter;
   submit.disabled = true;
   try {
-    if (isStaticPages) {
-      localStorage.setItem('planner-settings', JSON.stringify(settings));
-      settingsState = settings;
-    } else {
-      const response = await fetch('/api/settings', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings)
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || 'Không thể lưu cấu hình.');
-      settingsState = payload;
-    }
-    renderMachineCalculation();
+    await persistSettings(settings);
     closeSettings();
     showToast('Đã lưu định mức và tính lại số máy.');
   } catch (error) {

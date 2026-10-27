@@ -47,6 +47,15 @@ Công suất mỗi máy = ca/ngày × phút/ca × hiệu suất × số ngày k�
 Máy cần = làm tròn lên(Tổng phút / Công suất mỗi máy)
 ```
 
+### Danh mục cấu hình định mức
+
+- Có thể nhập file Excel hoặc tạo từng định mức thủ công.
+- AI local tự nhận diện các cột tên/mã kiểu, số phút, số máy, số ca, phút mỗi ca, hiệu suất và số ngày kế hoạch.
+- File cấu hình nhập vào được lưu thành danh mục mặc định; định mức đầu tiên được áp dụng cho phép tính kế hoạch.
+- Chọn một mục như **Oval 18** để xem toàn bộ thông tin.
+- Định mức đã lưu luôn bị khóa. Muốn sửa phải nhấn **Mở khóa để sửa** và xác nhận cảnh báo; sau khi lưu hệ thống tự khóa lại.
+- Khi chạy local, danh mục nằm trong bảng SQLite `production_standards`. Bản Sites lưu danh mục trong trình duyệt.
+
 ## Preview bằng Sites
 
 GPT Sites chạy giao diện tĩnh và vẫn có thể đọc, tổng hợp file Excel ngay trong trình duyệt. Do bản preview không chạy Node.js, dữ liệu không được ghi vào SQLite; SQLite hoạt động khi chạy ứng dụng bằng `npm run dev`.

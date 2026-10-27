@@ -70,6 +70,24 @@ database.exec(`
     checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     report_json TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS production_standards (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    minutes_per_impression REAL NOT NULL,
+    setup_minutes_per_po REAL,
+    machine_count INTEGER,
+    shifts_per_day INTEGER,
+    minutes_per_shift INTEGER,
+    efficiency_percent REAL,
+    planning_days INTEGER,
+    note TEXT,
+    source TEXT NOT NULL DEFAULT 'manual',
+    source_filename TEXT,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    locked INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
   INSERT OR IGNORE INTO file_history(import_id, category, filename, created_at, note)
     SELECT id, 'original', filename, imported_at, 'File tải lên được giữ nguyên; hệ thống chỉ đọc dữ liệu.'
     FROM imports;
@@ -179,6 +197,45 @@ function localAiCheck(importId, force = false) {
   return report;
 }
 
+function listStandards() {
+  return database.prepare(`
+    SELECT id, name, minutes_per_impression AS minutesPerImpression,
+           setup_minutes_per_po AS setupMinutesPerPo, machine_count AS machineCount,
+           shifts_per_day AS shiftsPerDay, minutes_per_shift AS minutesPerShift,
+           efficiency_percent AS efficiencyPercent, planning_days AS planningDays,
+           note, source, source_filename AS sourceFilename, is_default AS isDefault,
+           locked, strftime('%Y-%m-%dT%H:%M:%fZ', updated_at) AS updatedAt
+    FROM production_standards
+    ORDER BY is_default DESC, name COLLATE NOCASE
+  `).all().map((row) => ({ ...row, isDefault: Boolean(row.isDefault), locked: Boolean(row.locked) }));
+}
+
+function standardValues(standard) {
+  const values = {
+    name: String(standard.name || '').trim(),
+    minutesPerImpression: Number(standard.minutesPerImpression),
+    setupMinutesPerPo: standard.setupMinutesPerPo == null ? null : Number(standard.setupMinutesPerPo),
+    machineCount: standard.machineCount == null ? null : Number(standard.machineCount),
+    shiftsPerDay: standard.shiftsPerDay == null ? null : Number(standard.shiftsPerDay),
+    minutesPerShift: standard.minutesPerShift == null ? null : Number(standard.minutesPerShift),
+    efficiencyPercent: standard.efficiencyPercent == null ? null : Number(standard.efficiencyPercent),
+    planningDays: standard.planningDays == null ? null : Number(standard.planningDays),
+    note: String(standard.note || '').trim()
+  };
+  if (!values.name || !Number.isFinite(values.minutesPerImpression) || values.minutesPerImpression <= 0) {
+    throw new Error('Mỗi định mức cần có tên và số phút lớn hơn 0.');
+  }
+  const positiveFields = ['machineCount', 'shiftsPerDay', 'minutesPerShift', 'efficiencyPercent', 'planningDays'];
+  if (values.setupMinutesPerPo != null && (!Number.isFinite(values.setupMinutesPerPo) || values.setupMinutesPerPo < 0)) {
+    throw new Error('Phút setup phải là số không âm.');
+  }
+  if (positiveFields.some((field) => values[field] != null && (!Number.isFinite(values[field]) || values[field] <= 0))) {
+    throw new Error('Các thông số máy, ca, hiệu suất và ngày kế hoạch phải lớn hơn 0.');
+  }
+  if (values.efficiencyPercent != null && values.efficiencyPercent > 100) throw new Error('Hiệu suất không được vượt 100%.');
+  return values;
+}
+
 function sqliteApi() {
   return {
     name: 'sqlite-api',
@@ -204,24 +261,104 @@ function sqliteApi() {
         }
       });
 
+      server.middlewares.use('/api/standards', async (request, response) => {
+        if (request.method === 'GET') return sendJson(response, 200, { standards: listStandards() });
+        try {
+          const payload = JSON.parse(await readBody(request));
+          if (request.method === 'POST') {
+            const standards = Array.isArray(payload.standards) ? payload.standards : [payload];
+            if (!standards.length) return sendJson(response, 400, { error: 'Không có định mức hợp lệ.' });
+            database.exec('BEGIN IMMEDIATE');
+            try {
+              if (payload.makeDefault !== false) database.prepare('UPDATE production_standards SET is_default = 0').run();
+              const upsert = database.prepare(`
+                INSERT INTO production_standards(
+                  name, minutes_per_impression, setup_minutes_per_po, machine_count,
+                  shifts_per_day, minutes_per_shift, efficiency_percent, planning_days,
+                  note, source, source_filename, is_default, locked
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                ON CONFLICT(name) DO UPDATE SET
+                  minutes_per_impression = excluded.minutes_per_impression,
+                  setup_minutes_per_po = excluded.setup_minutes_per_po,
+                  machine_count = excluded.machine_count, shifts_per_day = excluded.shifts_per_day,
+                  minutes_per_shift = excluded.minutes_per_shift, efficiency_percent = excluded.efficiency_percent,
+                  planning_days = excluded.planning_days, note = excluded.note, source = excluded.source,
+                  source_filename = excluded.source_filename, is_default = excluded.is_default,
+                  locked = 1, updated_at = CURRENT_TIMESTAMP
+              `);
+              standards.forEach((standard, index) => {
+                const value = standardValues(standard);
+                upsert.run(
+                  value.name, value.minutesPerImpression, value.setupMinutesPerPo, value.machineCount,
+                  value.shiftsPerDay, value.minutesPerShift, value.efficiencyPercent, value.planningDays,
+                  value.note, payload.source || 'manual', payload.sourceFilename || null,
+                  payload.makeDefault !== false && index === 0 ? 1 : 0
+                );
+              });
+              database.exec('COMMIT');
+            } catch (error) {
+              database.exec('ROLLBACK');
+              throw error;
+            }
+            return sendJson(response, 200, { standards: listStandards() });
+          }
+          if (request.method === 'PUT') {
+            if (payload.setDefault && Number(payload.id)) {
+              database.exec('BEGIN IMMEDIATE');
+              try {
+                database.prepare('UPDATE production_standards SET is_default = 0').run();
+                database.prepare('UPDATE production_standards SET is_default = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(Number(payload.id));
+                database.exec('COMMIT');
+              } catch (error) {
+                database.exec('ROLLBACK');
+                throw error;
+              }
+              return sendJson(response, 200, { standards: listStandards() });
+            }
+            if (!payload.confirmed) return sendJson(response, 409, { error: 'Cần xác nhận mở khóa trước khi chỉnh sửa.' });
+            const value = standardValues(payload);
+            const updated = database.prepare(`
+              UPDATE production_standards SET name = ?, minutes_per_impression = ?,
+                setup_minutes_per_po = ?, machine_count = ?, shifts_per_day = ?,
+                minutes_per_shift = ?, efficiency_percent = ?, planning_days = ?, note = ?,
+                locked = 1, updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?
+            `).run(
+              value.name, value.minutesPerImpression, value.setupMinutesPerPo, value.machineCount,
+              value.shiftsPerDay, value.minutesPerShift, value.efficiencyPercent,
+              value.planningDays, value.note, Number(payload.id)
+            );
+            if (!updated.changes) return sendJson(response, 404, { error: 'Không tìm thấy định mức.' });
+            return sendJson(response, 200, { standards: listStandards() });
+          }
+          return sendJson(response, 405, { error: 'Method not allowed' });
+        } catch (error) {
+          return sendJson(response, 400, { error: error.message || 'Không thể lưu định mức.' });
+        }
+      });
+
       server.middlewares.use('/api/settings', async (request, response) => {
         if (request.method === 'GET') return sendJson(response, 200, currentSettings());
         if (request.method !== 'PUT') return sendJson(response, 405, { error: 'Method not allowed' });
         try {
           const payload = JSON.parse(await readBody(request));
           const numbers = {
-            minutesPerImpression: Number(payload.minutesPerImpression),
+            minutesPerImpression: payload.minutesPerImpression == null || payload.minutesPerImpression === '' ? null : Number(payload.minutesPerImpression),
             setupMinutesPerPo: Number(payload.setupMinutesPerPo || 0),
-            machineCount: Number(payload.machineCount),
+            machineCount: payload.machineCount == null || payload.machineCount === '' ? null : Number(payload.machineCount),
             shiftsPerDay: Number(payload.shiftsPerDay),
             minutesPerShift: Number(payload.minutesPerShift),
             efficiencyPercent: Number(payload.efficiencyPercent),
             planningDays: Number(payload.planningDays)
           };
           if (
-            numbers.minutesPerImpression <= 0 || numbers.setupMinutesPerPo < 0 || numbers.machineCount <= 0 ||
-            numbers.shiftsPerDay <= 0 || numbers.minutesPerShift <= 0 || numbers.efficiencyPercent <= 0 ||
-            numbers.efficiencyPercent > 100 || numbers.planningDays <= 0
+            (numbers.minutesPerImpression != null && (!Number.isFinite(numbers.minutesPerImpression) || numbers.minutesPerImpression <= 0)) ||
+            !Number.isFinite(numbers.setupMinutesPerPo) || numbers.setupMinutesPerPo < 0 ||
+            (numbers.machineCount != null && (!Number.isFinite(numbers.machineCount) || numbers.machineCount <= 0)) ||
+            !Number.isFinite(numbers.shiftsPerDay) || numbers.shiftsPerDay <= 0 ||
+            !Number.isFinite(numbers.minutesPerShift) || numbers.minutesPerShift <= 0 ||
+            !Number.isFinite(numbers.efficiencyPercent) || numbers.efficiencyPercent <= 0 ||
+            numbers.efficiencyPercent > 100 || !Number.isFinite(numbers.planningDays) || numbers.planningDays <= 0
           ) return sendJson(response, 400, { error: 'Thông số cấu hình không hợp lệ.' });
 
           database.prepare(`
