@@ -31,11 +31,11 @@ export function toIsoDate(value) {
   return Number.isNaN(date.getTime()) ? text : date.toISOString().slice(0, 10);
 }
 
-const label = (cell) => String(cell ?? '').replace(/\s+/g, ' ').trim().toUpperCase();
+export const label = (cell) => String(cell ?? '').replace(/\s+/g, ' ').trim().toUpperCase();
 
 // The header row moves between sheets (row 4 in some, row 6 in others) and TH repeats
 // it above the data, so use the last header-like row near the top.
-function findHeaderRow(table, fallback) {
+export function findHeaderRow(table, fallback) {
   const index = table.slice(0, 15).findLastIndex((cells) => {
     const labels = cells.map(label);
     return labels.includes('LINE') && labels.includes('PO');
@@ -59,7 +59,7 @@ export function dailyLoad(rows, days) {
 // Daily plan columns: a label column holds PXC CHUYỂN / PXI TRẢ / TỔNG TUẦN / TỔNG NGÀY on
 // separate rows (above or below the header, depending on the sheet); every column to its
 // right whose PXC cell is a date is one planned day.
-function readDayColumns(table) {
+export function readDayColumns(table) {
   const rows = {};
   let labelColumn = -1;
   table.slice(0, 15).forEach((cells, rowIndex) => cells.forEach((cell, column) => {
@@ -80,7 +80,10 @@ function readDayColumns(table) {
       column,
       date: toIsoDate(pickup),
       returnDate: rows.return == null ? null : toIsoDate(table[rows.return][column]) || null,
-      fileTotal: typeof fileTotal === 'number' ? fileTotal : null
+      fileTotal: typeof fileTotal === 'number' ? fileTotal : null,
+      // Sheet rows of the PXI TRẢ and TỔNG NGÀY labels, for pointing at a wrong cell.
+      returnRow: rows.return ?? null,
+      totalRow: rows.day ?? null
     });
   }
   return days;

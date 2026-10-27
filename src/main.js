@@ -19,6 +19,7 @@ import { buildExportWorkbook, downloadWorkbook, exportFilename, sortByUrgency } 
 import { compactRows, diffBookingRows } from './booking-diff.js';
 import { renderChangeList, renderChangeReport, unreviewedCount } from './changes-view.js';
 import { checkIssues, renderCheckReport } from './check-view.js';
+import { checkBookingSheet } from './booking-check.js';
 
 const isStaticPages = import.meta.env.PROD || import.meta.env.BASE_URL !== '/';
 
@@ -543,7 +544,8 @@ async function loadBookingDetail() {
   if (latestBooking.source === 'demo') return;
   if (isStaticPages) {
     const stored = readJson('planner-booking-rows', null);
-    if (stored && String(stored.importId) === String(latestBooking.importId)) bookingDetail = { days: [], ...stored };
+    const file = fileHistoryState.find((item) => item.category === 'original' && String(item.importId) === String(latestBooking.importId));
+    if (stored && String(stored.importId) === String(latestBooking.importId)) bookingDetail = { days: [], ...stored, sheetCheck: file?.sheetCheck || null };
     return;
   }
   try {
@@ -723,7 +725,7 @@ function checkSources() {
 function renderCheck() {
   if (!warehouseSummary) return;
   const booking = activeBooking();
-  document.querySelector('#checkReport').innerHTML = renderCheckReport({ booking, summary: warehouseSummary, sources: checkSources(), aiReport: latestAiReport });
+  document.querySelector('#checkReport').innerHTML = renderCheckReport({ booking, summary: warehouseSummary, sources: checkSources(), aiReport: latestAiReport, sheetCheck: bookingDetail.sheetCheck });
   const issues = checkIssues({ booking, summary: warehouseSummary });
   document.querySelector('#checkStatus').textContent = issues.join(' ') || `Sẵn sàng xuất ${formatNumber.format(booking.rows?.length || 0)} dòng.`;
   document.querySelector('#checkModal [data-export]').disabled = Boolean(issues.length);
@@ -748,7 +750,7 @@ async function exportSummary() {
   const booking = activeBooking();
   const filename = exportFilename(new Date(), booking.batch);
   if (!booking.rows?.length) throw new Error('Chưa có dữ liệu booking chi tiết. Nhập lại file booking trước khi xuất.');
-  const workbook = buildExportWorkbook({ booking, lots: lotSummary.items });
+  const workbook = buildExportWorkbook({ booking, lots: lotSummary.items, sheetCheck: bookingDetail.sheetCheck });
   downloadWorkbook(workbook, filename);
   // The export is the "processed" result of the newest booking file.
   const original = fileHistoryState.find((file) => file.category === 'original' && String(file.importId) === String(latestBooking.importId));
@@ -916,7 +918,8 @@ async function importBooking(buffer, filename, origin = null) {
   const workbook = readWorkbook(buffer);
   const { rows, days } = readBooking(workbook);
   if (!rows.length) throw new Error('Không tìm thấy dữ liệu booking hợp lệ (sheet TH hoặc LEADTIME).');
-  const sheetCheck = crossCheckSheets(workbook);
+  // Cell-level problems of TH are kept with the import and listed in "Kiểm tra file".
+  const sheetCheck = { ...crossCheckSheets(workbook), cells: checkBookingSheet(workbook) };
   const summary = summarizeBooking(rows);
   let importId;
   let hasChanges;
@@ -933,6 +936,7 @@ async function importBooking(buffer, filename, origin = null) {
       createdAt: new Date().toISOString(),
       ...summary,
       aiReport: analyzeBookingRows(rows, { sheetCheck }),
+      sheetCheck,
       changes,
       note: 'Chỉ lưu thông tin file; file Excel gốc không bị thay đổi.'
     }, ...fileHistoryState.filter((item) => item.id !== 'demo-original')];

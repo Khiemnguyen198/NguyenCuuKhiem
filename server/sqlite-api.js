@@ -537,9 +537,14 @@ export function sqliteApi() {
       server.middlewares.use('/api/booking-rows', (request, response) => {
         if (request.method !== 'GET') return sendJson(response, 405, { error: 'Method not allowed' });
         const importId = Number(new URL(request.url, 'http://local').searchParams.get('id'));
-        const imported = importId && database.prepare('SELECT id, filename FROM imports WHERE id = ?').get(importId);
+        const imported = importId && database.prepare('SELECT id, filename, sheet_check_json AS sheetCheckJson FROM imports WHERE id = ?').get(importId);
         if (!imported) return sendJson(response, 404, { error: 'Không tìm thấy lần nhập booking.' });
-        return sendJson(response, 200, { filename: imported.filename, days: bookingDaysFor(importId), rows: bookingRowsFor(importId) });
+        return sendJson(response, 200, {
+          filename: imported.filename,
+          days: bookingDaysFor(importId),
+          rows: bookingRowsFor(importId),
+          sheetCheck: imported.sheetCheckJson ? JSON.parse(imported.sheetCheckJson) : null
+        });
       });
 
       server.middlewares.use('/api/changes', async (request, response) => {
