@@ -51,6 +51,19 @@ database.exec(`
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
   INSERT OR IGNORE INTO app_settings(id) VALUES (1);
+  CREATE TABLE IF NOT EXISTS file_history (
+    id INTEGER PRIMARY KEY,
+    import_id INTEGER REFERENCES imports(id) ON DELETE CASCADE,
+    category TEXT NOT NULL CHECK (category IN ('original', 'processed', 'delivered')),
+    filename TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    note TEXT,
+    UNIQUE(import_id, category, filename)
+  );
+  CREATE INDEX IF NOT EXISTS file_history_category ON file_history(category, created_at DESC);
+  INSERT OR IGNORE INTO file_history(import_id, category, filename, created_at, note)
+    SELECT id, 'original', filename, imported_at, 'File tải lên được giữ nguyên; hệ thống chỉ đọc dữ liệu.'
+    FROM imports;
 `);
 
 const demoDashboard = {
@@ -167,6 +180,20 @@ function sqliteApi() {
         }
       });
 
+      server.middlewares.use('/api/files', (request, response) => {
+        if (request.method !== 'GET') return sendJson(response, 405, { error: 'Method not allowed' });
+        const files = database.prepare(`
+          SELECT h.id, h.category, h.filename, h.created_at AS createdAt, h.note,
+                 i.row_count AS rowCount, i.total_quantity AS totalQuantity,
+                 i.total_impressions AS totalImpressions
+          FROM file_history h
+          LEFT JOIN imports i ON i.id = h.import_id
+          ORDER BY h.created_at DESC, h.id DESC
+          LIMIT 100
+        `).all();
+        return sendJson(response, 200, { files });
+      });
+
       server.middlewares.use('/api/imports', async (request, response) => {
         if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
         try {
@@ -214,6 +241,10 @@ function sqliteApi() {
                 row.leadTime ?? null
               );
             }
+            database.prepare(`
+              INSERT OR IGNORE INTO file_history(import_id, category, filename, note)
+              VALUES (?, 'original', ?, 'File tải lên được giữ nguyên; hệ thống chỉ đọc dữ liệu.')
+            `).run(imported.lastInsertRowid, payload.filename);
             database.exec('COMMIT');
           } catch (error) {
             database.exec('ROLLBACK');

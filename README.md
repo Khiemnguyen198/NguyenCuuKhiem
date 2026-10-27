@@ -17,6 +17,12 @@ Mở `http://localhost:4173` trong trình duyệt.
 2. Chọn workbook `.xlsx` có sheet `TH`, hoặc các sheet `LEADTIME 1/2/3/5 NGÀY`.
 3. Ứng dụng đọc các cột booking, lưu phiên nhập vào `.data/planner.db`, rồi cập nhật số dòng, tổng sản lượng và tổng lượt hình.
 
+Mục **Tổng quan** phân loại lịch sử file thành:
+
+- File kết quả đã giao.
+- File đã xử lý nhưng chưa giao.
+- File gốc chưa chỉnh sửa. Ứng dụng không ghi đè workbook tải lên; chỉ lưu dữ liệu đã đọc vào SQLite.
+
 Phần số phút và số máy hiện dùng dữ liệu mô phỏng giao diện. Kết quả thật chỉ được tính sau khi cấu hình định mức thời gian, số máy, số ca và hiệu suất.
 
 Mở mục **Cấu hình** hoặc nhấn vào chỉ số **Máy cần** để nhập định mức. Công thức:

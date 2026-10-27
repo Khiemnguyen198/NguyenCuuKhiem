@@ -26,6 +26,15 @@ const defaultSettings = {
 
 let dashboardState = fallbackDashboard;
 let settingsState = { ...defaultSettings };
+let fileHistoryState = [{
+  id: 'demo-original',
+  category: 'original',
+  filename: fallbackDashboard.filename,
+  createdAt: '2026-10-26T14:32:00+07:00',
+  rowCount: fallbackDashboard.rowCount,
+  totalQuantity: fallbackDashboard.totalQuantity,
+  note: 'File gốc được giữ nguyên; hệ thống chỉ đọc dữ liệu.'
+}];
 
 const schedule = [
   {
@@ -94,8 +103,8 @@ document.querySelector('#app').innerHTML = `
       <header class="topbar">
         <div class="title-group">
           <div>
-            <p class="eyebrow">BẢNG ĐIỀU PHỐI</p>
-            <h1>Kế hoạch sản xuất</h1>
+            <p class="eyebrow" id="pageEyebrow">BẢNG ĐIỀU PHỐI</p>
+            <h1 id="pageTitle">Kế hoạch sản xuất</h1>
           </div>
           <button class="primary-button" id="importButton"><i class="ph ph-upload-simple"></i>Nhập file booking</button>
           <input id="fileInput" type="file" accept=".xlsx,.xls" hidden />
@@ -105,7 +114,32 @@ document.querySelector('#app').innerHTML = `
         </div>
       </header>
 
-      <div class="workspace">
+      <section class="overview-view" id="overviewView" hidden>
+        <div class="overview-intro">
+          <div><p class="section-heading__overline">KHO TỆP SẢN XUẤT</p><h2>Lịch sử xử lý file</h2><p>Theo dõi file từ lúc nhận bản gốc đến khi hoàn thành và giao đi.</p></div>
+          <div class="overview-counts">
+            <div><strong id="deliveredCount">0</strong><span>Đã giao</span></div>
+            <div><strong id="processedCount">0</strong><span>Đã xử lý</span></div>
+            <div><strong id="originalCount">0</strong><span>File gốc</span></div>
+          </div>
+        </div>
+        <div class="file-history-grid">
+          <section class="file-history-card file-history-card--delivered">
+            <header><span class="history-icon"><i class="ph ph-paper-plane-tilt"></i></span><div><h3>Lịch sử giao file</h3><p>Các file kết quả đã gửi đi</p></div><span class="history-count" id="deliveredBadge">0</span></header>
+            <div class="file-history-list" id="deliveredFiles"></div>
+          </section>
+          <section class="file-history-card file-history-card--processed">
+            <header><span class="history-icon"><i class="ph ph-check-square-offset"></i></span><div><h3>File đã làm</h3><p>Kết quả đã xử lý, chờ giao</p></div><span class="history-count" id="processedBadge">0</span></header>
+            <div class="file-history-list" id="processedFiles"></div>
+          </section>
+          <section class="file-history-card file-history-card--original">
+            <header><span class="history-icon"><i class="ph ph-file-lock"></i></span><div><h3>File gốc chưa chỉnh sửa</h3><p>Bản tải lên được bảo toàn</p></div><span class="history-count" id="originalBadge">0</span></header>
+            <div class="file-history-list" id="originalFiles"></div>
+          </section>
+        </div>
+      </section>
+
+      <div class="workspace" id="planningView">
         <div class="workspace__main">
           <section class="file-strip" aria-live="polite">
             <div class="file-icon"><i class="ph ph-file-xls"></i></div>
@@ -261,6 +295,70 @@ function renderDashboard(data) {
   renderMachineCalculation();
 }
 
+function formatFileDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || 'Chưa có thời gian';
+  return new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short', timeStyle: 'short' }).format(date);
+}
+
+function emptyHistory(label) {
+  return `<div class="history-empty"><i class="ph ph-tray"></i><strong>Chưa có ${label}</strong><span>Dữ liệu sẽ xuất hiện tại đây khi có thao tác thực tế.</span></div>`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
+}
+
+function fileRow(file) {
+  const meta = [file.rowCount ? `${formatNumber.format(file.rowCount)} dòng` : null, file.totalQuantity ? `${formatNumber.format(file.totalQuantity)} sản phẩm` : null].filter(Boolean).join(' • ');
+  const safeFilename = escapeHtml(file.filename);
+  return `
+    <article class="history-row">
+      <span class="history-row__icon"><i class="ph ph-file-xls"></i></span>
+      <div class="history-row__body"><strong title="${safeFilename}">${safeFilename}</strong><span>${escapeHtml(meta || file.note || 'File sản xuất')}</span><small>${escapeHtml(formatFileDate(file.createdAt))}</small></div>
+      <button class="history-row__menu" aria-label="Xem chi tiết ${safeFilename}"><i class="ph ph-dots-three-vertical"></i></button>
+    </article>
+  `;
+}
+
+function renderFileHistory(files = fileHistoryState) {
+  fileHistoryState = files;
+  const groups = {
+    delivered: files.filter((file) => file.category === 'delivered'),
+    processed: files.filter((file) => file.category === 'processed'),
+    original: files.filter((file) => file.category === 'original')
+  };
+  for (const [category, items] of Object.entries(groups)) {
+    document.querySelector(`#${category}Count`).textContent = formatNumber.format(items.length);
+    document.querySelector(`#${category}Badge`).textContent = formatNumber.format(items.length);
+    document.querySelector(`#${category}Files`).innerHTML = items.length ? items.map(fileRow).join('') : emptyHistory(category === 'delivered' ? 'file đã giao' : category === 'processed' ? 'file đã xử lý' : 'file gốc');
+  }
+}
+
+async function loadFileHistory() {
+  if (isStaticPages) {
+    renderFileHistory(fileHistoryState);
+    return;
+  }
+  try {
+    const response = await fetch('/api/files');
+    if (!response.ok) throw new Error();
+    const payload = await response.json();
+    renderFileHistory(payload.files);
+  } catch {
+    renderFileHistory(fileHistoryState);
+  }
+}
+
+function showPage(pageName) {
+  const isOverview = pageName === 'Tổng quan';
+  document.querySelector('#overviewView').hidden = !isOverview;
+  document.querySelector('#planningView').hidden = isOverview;
+  document.querySelector('#pageEyebrow').textContent = isOverview ? 'QUẢN LÝ FILE' : 'BẢNG ĐIỀU PHỐI';
+  document.querySelector('#pageTitle').textContent = isOverview ? 'Tổng quan' : 'Kế hoạch sản xuất';
+  if (isOverview) loadFileHistory();
+}
+
 function calculateCapacity(data, settings) {
   const minutesPerImpression = Number(settings.minutesPerImpression);
   const machineCount = Number(settings.machineCount);
@@ -391,6 +489,8 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
     };
     if (isStaticPages) {
       renderDashboard(localPayload);
+      fileHistoryState = [{ id: `browser-${Date.now()}`, category: 'original', filename: file.name, createdAt: new Date().toISOString(), rowCount: rows.length, totalQuantity: localPayload.totalQuantity, note: 'File gốc được giữ nguyên trong trình duyệt.' }, ...fileHistoryState.filter((item) => item.filename !== file.name)];
+      renderFileHistory(fileHistoryState);
       showToast(`Đã đọc ${formatNumber.format(localPayload.rowCount)} dòng. Bản web công khai không lưu SQLite.`, 'info');
       return;
     }
@@ -410,6 +510,7 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
       return;
     }
     renderDashboard(payload);
+    loadFileHistory();
     showToast(`Đã nhập ${formatNumber.format(payload.rowCount)} dòng vào SQLite.`);
   } catch (error) {
     showToast(error.message, 'error');
@@ -424,7 +525,8 @@ document.querySelectorAll('.nav__item').forEach((item) => item.addEventListener(
   document.querySelectorAll('.nav__item').forEach((navItem) => navItem.classList.remove('nav__item--active'));
   item.classList.add('nav__item--active');
   if (item.dataset.page === 'Cấu hình') openSettings();
-  else if (item.dataset.page !== 'Kế hoạch') showToast(`${item.dataset.page} đang được hoàn thiện trong bản test.`, 'info');
+  else if (item.dataset.page === 'Tổng quan' || item.dataset.page === 'Kế hoạch') showPage(item.dataset.page);
+  else showToast(`${item.dataset.page} đang được hoàn thiện trong bản test.`, 'info');
 }));
 
 document.querySelector('#settingsShortcut').addEventListener('click', openSettings);
@@ -463,5 +565,7 @@ document.querySelectorAll('.issue').forEach((issue) => issue.addEventListener('c
 }));
 
 renderSchedule();
+renderFileHistory();
 loadDashboard();
 loadSettings();
+loadFileHistory();
