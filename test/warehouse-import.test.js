@@ -23,7 +23,7 @@ test('reads the TỔNG HỢP sheet by header names', () => {
 
 test('summarizes each product by its slowest print and counts each PO once', () => {
   const lines = readWarehouseSheet(sheetRows());
-  const { items, totals } = summarizeWarehouse(lines, [{ model: '357446', color: 'BLEU', lastOutput: '2026-10-25', leadTime: '1 ngày' }], new Date(2026, 9, 27));
+  const { items, totals } = summarizeWarehouse(lines, { bookingModels: [{ model: '357446', color: 'BLEU', lastOutput: '2026-10-25', leadTime: '1 ngày' }], today: new Date(2026, 9, 27) });
   const product = items.find((item) => item.model === '357446');
 
   assert.equal(product.customer, 'Decathlon');
@@ -40,4 +40,21 @@ test('summarizes each product by its slowest print and counts each PO once', () 
   assert.equal(waiting.contract, 300);
   assert.equal(waiting.status, 'waiting');
   assert.equal(totals.statusCounts.waiting, 1);
+});
+
+test('adds booked products that the warehouse has not received yet', () => {
+  const { items } = summarizeWarehouse([], {
+    bookingModels: [{ model: '361367', color: '9057150CORA 1P NOIR', customer: 'DECATHLON', quantity: 1200, lastOutput: '2026-10-29', leadTime: '1 ngày' }],
+    today: new Date(2026, 9, 27)
+  });
+  assert.equal(items.length, 1);
+  assert.deepEqual([items[0].contract, items[0].status, items[0].atRisk, items[0].daysToDue], [1200, 'waiting', true, 2]);
+});
+
+test('uses the receiving log for received quantities and matches colors loosely', () => {
+  const lines = readWarehouseSheet(sheetRows());
+  const receipts = new Map([['357446|BLEU', { model: '357446', color: 'BLEU*', received: 1100, shipped: 0, receipts: 3, contractTotal: 1000, lastDate: '2026-10-26' }]]);
+  const { items } = summarizeWarehouse(lines, { receipts });
+  const product = items.find((item) => item.model === '357446');
+  assert.deepEqual([product.received, product.receivedInWarehouseFile, product.lastReceiptDate], [1100, 1000, '2026-10-26']);
 });

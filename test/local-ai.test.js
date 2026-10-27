@@ -39,3 +39,12 @@ test('flags a statistical quantity outlier without external services', () => {
   const report = analyzeBookingRows(rows);
   assert.ok(report.findings.some((finding) => finding.code === 'quantity_outlier'));
 });
+
+test('flags Sunday due dates, missing contract totals and sheet mismatches', () => {
+  const rows = [validRow(0), { ...validRow(1), outputDate: '2026-11-01', contractQuantity: 0 }];
+  const report = analyzeBookingRows(rows, { sheetCheck: { mismatches: [{ row: 'LINE 3', po: 'PO3', ref: 'R1', quantity: 10, note: 'thiếu trong TH' }] } });
+  const codes = Object.fromEntries(report.findings.map((finding) => [finding.code, finding.count]));
+  assert.equal(codes.sunday_output, 1);
+  assert.equal(codes.missing_contract, 1);
+  assert.equal(codes.sheet_mismatch, 1);
+});

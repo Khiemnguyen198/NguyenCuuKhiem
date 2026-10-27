@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { productKey } from './keys.js';
 
 const LEAD_TIME_SHEETS = [
   ['LEADTIME 1 NGÀY', '1 ngày'],
@@ -30,28 +31,82 @@ export function toIsoDate(value) {
   return Number.isNaN(date.getTime()) ? text : date.toISOString().slice(0, 10);
 }
 
-// Factory workbooks pad headers with spaces (" INPUT ", " MODEL CODE "), so keys are trimmed.
-function trimKeys(record) {
-  return Object.fromEntries(Object.entries(record).map(([key, value]) => [key.trim(), value]));
-}
+const label = (cell) => String(cell ?? '').replace(/\s+/g, ' ').trim().toUpperCase();
 
 // The header row moves between sheets (row 4 in some, row 6 in others) and TH repeats
 // it above the data, so use the last header-like row near the top.
-function findHeaderRow(sheet, fallback) {
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, range: 0, defval: null, raw: true, blankrows: true }).slice(0, 15);
-  const index = rows.findLastIndex((cells) => {
-    const labels = cells.map((cell) => String(cell ?? '').trim().toUpperCase());
+function findHeaderRow(table, fallback) {
+  const index = table.slice(0, 15).findLastIndex((cells) => {
+    const labels = cells.map(label);
     return labels.includes('LINE') && labels.includes('PO');
   });
   return index === -1 ? fallback : index;
 }
 
+const DAY_LABELS = { pickup: 'PXC CHUYỂN', return: 'PXI TRẢ', week: 'TỔNG TUẦN', day: 'TỔNG NGÀY' };
+
+// Total print load per planned day, as the TỔNG NGÀY row computes it: Σ HÌNH IN × allocation.
+export function dailyLoad(rows, days) {
+  const totals = days.map(() => 0);
+  for (const row of rows) {
+    for (const [index, value] of Object.entries(row.allocations || {})) {
+      if (typeof value === 'number') totals[index] += value * Number(row.printCount || 0);
+    }
+  }
+  return totals;
+}
+
+// Daily plan columns: a label column holds PXC CHUYỂN / PXI TRẢ / TỔNG TUẦN / TỔNG NGÀY on
+// separate rows (above or below the header, depending on the sheet); every column to its
+// right whose PXC cell is a date is one planned day.
+function readDayColumns(table) {
+  const rows = {};
+  let labelColumn = -1;
+  table.slice(0, 15).forEach((cells, rowIndex) => cells.forEach((cell, column) => {
+    for (const [key, text] of Object.entries(DAY_LABELS)) {
+      if (label(cell) === text) {
+        rows[key] = rowIndex;
+        labelColumn = column;
+      }
+    }
+  }));
+  if (rows.pickup == null) return [];
+  const days = [];
+  for (let column = labelColumn + 1; column < table[rows.pickup].length; column += 1) {
+    const pickup = table[rows.pickup][column];
+    if (typeof pickup !== 'number') continue;
+    const fileTotal = rows.day == null ? null : table[rows.day][column];
+    days.push({
+      column,
+      date: toIsoDate(pickup),
+      returnDate: rows.return == null ? null : toIsoDate(table[rows.return][column]) || null,
+      fileTotal: typeof fileTotal === 'number' ? fileTotal : null
+    });
+  }
+  return days;
+}
+
 function readRowsFromSheet(sheet, fallbackRange, leadTimeOverride = null) {
-  const range = findHeaderRow(sheet, fallbackRange);
-  const records = XLSX.utils.sheet_to_json(sheet, { range, defval: null, raw: true }).map(trimKeys);
-  return records
-    .filter((row) => row.LINE != null && [row.PO, row.REF, row['MODEL CODE'], row['LINE QTY']].some((value) => value != null && value !== ''))
-    .map((row) => ({
+  // Array mode keeps every row aligned with the daily plan columns.
+  const table = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true, blankrows: true });
+  const headerIndex = findHeaderRow(table, fallbackRange);
+  const headers = (table[headerIndex] || []).map((cell) => String(cell ?? '').replace(/\s+/g, ' ').trim());
+  const days = readDayColumns(table);
+  const rows = [];
+  for (const cells of table.slice(headerIndex + 1)) {
+    const row = {};
+    headers.forEach((header, column) => {
+      if (header && !(header in row)) row[header] = cells[column];
+    });
+    if (row.LINE == null || row.LINE === '' || label(row.LINE) === 'LINE') continue;
+    if (![row.PO, row.REF, row['MODEL CODE'], row['LINE QTY']].some((value) => value != null && value !== '')) continue;
+    // Keyed by day position, not date: the sheet sometimes repeats a date in two columns.
+    const allocations = {};
+    days.forEach((day, index) => {
+      const value = cells[day.column];
+      if (value != null && value !== '' && value !== 0) allocations[index] = typeof value === 'number' ? Math.round(value * 100) / 100 : String(value).trim();
+    });
+    rows.push({
       line: String(row.LINE ?? ''),
       customer: String(row.CUS ?? ''),
       brand: String(row.BRAND ?? ''),
@@ -67,19 +122,83 @@ function readRowsFromSheet(sheet, fallbackRange, leadTimeOverride = null) {
       contractQuantity: Number(row['SLHĐ TỔNG']) || null,
       planner: String(row['KẾ HOẠCH'] ?? ''),
       printCount: Number(row['HÌNH IN'] || 0),
-      leadTime: String(row.Leadtime ?? leadTimeOverride ?? '')
-    }));
+      leadTime: String(row.Leadtime ?? leadTimeOverride ?? ''),
+      allocations
+    });
+  }
+  return { rows, days: days.map(({ date, returnDate, fileTotal }) => ({ date, returnDate, fileTotal })) };
 }
 
 export function readWorkbook(buffer) {
   return XLSX.read(buffer, { type: 'array' });
 }
 
-export function extractBookingRows(workbook) {
+// TH is assembled by hand from the four lead-time sheets, so compare them before trusting TH.
+export function crossCheckSheets(workbook) {
+  const leadTimeSheets = LEAD_TIME_SHEETS.filter(([sheetName]) => workbook.Sheets[sheetName]);
+  if (!workbook.Sheets.TH) return { checked: false, mismatches: [], dailyTotals: [] };
+  if (!leadTimeSheets.length) return { checked: true, mismatches: [], dailyTotals: checkDailyTotals(readRowsFromSheet(workbook.Sheets.TH, 4)) };
+  const key = (row) => [row.po, row.ref, row.color, row.leadTime].map((value) => String(value ?? '').trim().toUpperCase()).join('|');
+  const totals = (rows) => rows.reduce((map, row) => {
+    const entry = map.get(key(row)) || { row, quantity: 0 };
+    entry.quantity += Number(row.lineQuantity || 0);
+    map.set(key(row), entry);
+    return map;
+  }, new Map());
+  const summary = totals(readRowsFromSheet(workbook.Sheets.TH, 4).rows);
+  const sources = totals(leadTimeSheets.flatMap(([sheetName, leadTime]) => readRowsFromSheet(workbook.Sheets[sheetName], 3, leadTime).rows));
+  const mismatches = [];
+  const label = (entry, note) => ({ row: entry.row.line ? `LINE ${entry.row.line}` : '—', po: entry.row.po || 'Chưa có PO', ref: entry.row.ref, quantity: entry.quantity, note });
+  for (const [rowKey, entry] of summary) {
+    const source = sources.get(rowKey);
+    if (!source) mismatches.push(label(entry, `chỉ có trong TH (${entry.row.leadTime})`));
+    else if (source.quantity !== entry.quantity) mismatches.push(label(entry, `TH ${entry.quantity} ≠ sheet leadtime ${source.quantity}`));
+  }
+  for (const [rowKey, entry] of sources) {
+    if (!summary.has(rowKey)) mismatches.push(label(entry, `thiếu trong TH (${entry.row.leadTime})`));
+  }
+  return { checked: true, mismatches, dailyTotals: checkDailyTotals(readRowsFromSheet(workbook.Sheets.TH, 4)) };
+}
+
+const shortDate = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '');
+
+// TỔNG NGÀY is a SUMPRODUCT formula typed by hand; ranges copied from another sheet drift.
+export function checkDailyTotals({ rows, days }) {
+  const computed = dailyLoad(rows, days);
+  return days
+    .map((day, index) => ({ day, computed: computed[index] }))
+    .filter(({ day, computed: value }) => day.fileTotal != null && Math.abs(day.fileTotal - value) > 1)
+    .map(({ day, computed: value }) => ({
+      row: `PXC ${shortDate(day.date)}`,
+      po: '—',
+      quantity: Math.round(value),
+      note: `TỔNG NGÀY trong file ${Math.round(day.fileTotal)} ≠ tính lại ${Math.round(value)} lượt hình`
+    }));
+}
+
+// Booking rows plus the planned days (PXC pick-up / PXI return dates) they are allocated to.
+export function readBooking(workbook) {
   if (workbook.Sheets.TH) return readRowsFromSheet(workbook.Sheets.TH, 4);
-  return LEAD_TIME_SHEETS.flatMap(([sheetName, leadTime]) => workbook.Sheets[sheetName]
-    ? readRowsFromSheet(workbook.Sheets[sheetName], 3, leadTime)
-    : []);
+  const parts = LEAD_TIME_SHEETS
+    .filter(([sheetName]) => workbook.Sheets[sheetName])
+    .map(([sheetName, leadTime]) => readRowsFromSheet(workbook.Sheets[sheetName], 3, leadTime));
+  // Each lead-time sheet has its own return dates, so the combined view keeps one column per
+  // pick-up date and re-keys every row's allocations to it.
+  const dates = [...new Set(parts.flatMap((part) => part.days.map((day) => day.date)))].sort();
+  const position = new Map(dates.map((date, index) => [date, String(index)]));
+  const rows = parts.flatMap((part) => part.rows.map((row) => {
+    const allocations = {};
+    for (const [index, value] of Object.entries(row.allocations)) {
+      const key = position.get(part.days[index].date);
+      allocations[key] = typeof value === 'number' && typeof allocations[key] === 'number' ? allocations[key] + value : value;
+    }
+    return { ...row, allocations };
+  }));
+  return { rows, days: dates.map((date) => ({ date, returnDate: null, fileTotal: null })) };
+}
+
+export function extractBookingRows(workbook) {
+  return readBooking(workbook).rows;
 }
 
 const minDate = (current, value) => (value && (!current || value < current) ? value : current);
@@ -126,14 +245,13 @@ export function summarizeLeadTimes(rows) {
     }));
 }
 
-const modelKey = (model, color) => `${String(model ?? '').replace(/\s+/g, ' ').trim().toLocaleUpperCase('vi-VN')}|${String(color ?? '').replace(/\s+/g, ' ').trim().toLocaleUpperCase('vi-VN')}`;
 
 // One entry per product (REF + COLOR) so warehouse progress can be matched to its due date.
 export function summarizeModels(rows) {
   const models = new Map();
   rows.forEach((row) => {
     if (!row.ref) return;
-    const key = modelKey(row.ref, row.color);
+    const key = productKey(row.ref, row.color);
     const model = models.get(key) || { model: row.ref, color: row.color, customer: row.customer, quantity: 0, firstOutput: null, lastOutput: null, leadTime: row.leadTime };
     model.quantity += Number(row.lineQuantity || 0);
     model.firstOutput = minDate(model.firstOutput, row.outputDate);

@@ -112,15 +112,65 @@ function openDatabase() {
 `);
   const bookingColumns = database.prepare('PRAGMA table_info(booking_rows)').all().map((column) => column.name);
   if (!bookingColumns.includes('contract_quantity')) database.exec('ALTER TABLE booking_rows ADD COLUMN contract_quantity REAL');
+  const importColumns = database.prepare('PRAGMA table_info(imports)').all().map((column) => column.name);
+  if (!importColumns.includes('sheet_check_json')) database.exec('ALTER TABLE imports ADD COLUMN sheet_check_json TEXT');
+  if (!importColumns.includes('days_json')) database.exec('ALTER TABLE imports ADD COLUMN days_json TEXT');
+  if (!bookingColumns.includes('allocations_json')) database.exec('ALTER TABLE booking_rows ADD COLUMN allocations_json TEXT');
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS source_snapshots (
+      id INTEGER PRIMARY KEY,
+      kind TEXT NOT NULL CHECK (kind IN ('receipts', 'deliveries')),
+      filename TEXT NOT NULL,
+      origin TEXT,
+      imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      lines_json TEXT NOT NULL
+    );
+    INSERT INTO source_snapshots(kind, filename, imported_at, lines_json)
+      SELECT 'deliveries', filename, imported_at, lines_json FROM warehouse_snapshots
+      WHERE NOT EXISTS (SELECT 1 FROM source_snapshots WHERE kind = 'deliveries')
+      ORDER BY id DESC LIMIT 1;
+  `);
 }
+
+const SOURCE_KINDS = new Set(['receipts', 'deliveries']);
+
+function latestSource(kind) {
+  const row = database.prepare(`
+    SELECT filename, origin, strftime('%Y-%m-%dT%H:%M:%fZ', imported_at) AS importedAt, lines_json AS linesJson
+    FROM source_snapshots WHERE kind = ? ORDER BY id DESC LIMIT 1
+  `).get(kind);
+  return row
+    ? { filename: row.filename, origin: row.origin, importedAt: row.importedAt, lines: JSON.parse(row.linesJson) }
+    : { filename: null, origin: null, importedAt: null, lines: [] };
+}
+
+// Share links usually open a viewer page; ask the host for the file itself.
+export function directDownloadUrl(input) {
+  const url = new URL(input);
+  if (url.protocol !== 'https:') throw new Error('Chỉ hỗ trợ link https.');
+  if (/(^|\.)sharepoint\.com$|(^|\.)onedrive\.live\.com$|^1drv\.ms$/.test(url.hostname)) url.searchParams.set('download', '1');
+  const sheet = url.hostname === 'docs.google.com' && url.pathname.match(/^\/spreadsheets\/d\/([^/]+)/);
+  if (sheet) return `https://docs.google.com/spreadsheets/d/${sheet[1]}/export?format=xlsx`;
+  return url.toString();
+}
+
+const isPrivateHost = (hostname) => hostname === 'localhost'
+  || /^(127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|0\.)/.test(hostname)
+  || hostname.endsWith('.local') || hostname.startsWith('[');
 
 function bookingRowsFor(importId) {
   return database.prepare(`
-    SELECT line, customer, po, ref, color, model_code AS modelCode, line_quantity AS lineQuantity,
-           input_date AS inputDate, output_date AS outputDate, lead_time AS leadTime,
-           print_count AS printCount, contract_quantity AS contractQuantity, ticket_number AS ticketNumber
+    SELECT line, customer, brand, po, ref, color, season, model_code AS modelCode, planner,
+           line_quantity AS lineQuantity, input_date AS inputDate, output_date AS outputDate,
+           lead_time AS leadTime, print_count AS printCount, contract_quantity AS contractQuantity,
+           ticket_number AS ticketNumber, allocations_json AS allocationsJson
     FROM booking_rows WHERE import_id = ? ORDER BY id
-  `).all(importId);
+  `).all(importId).map(({ allocationsJson, ...row }) => ({ ...row, allocations: allocationsJson ? JSON.parse(allocationsJson) : {} }));
+}
+
+function bookingDaysFor(importId) {
+  const row = database.prepare('SELECT days_json AS daysJson FROM imports WHERE id = ?').get(importId);
+  return row?.daysJson ? JSON.parse(row.daysJson) : [];
 }
 
 function listChanges() {
@@ -192,7 +242,8 @@ function latestDashboard(importId = null) {
     source: 'sqlite',
     importId: latest.id,
     filename: latest.filename,
-    importedAt: latest.imported_at,
+    // SQLite CURRENT_TIMESTAMP is UTC without a zone marker.
+    importedAt: `${String(latest.imported_at).replace(' ', 'T')}Z`,
     rowCount: latest.row_count,
     totalQuantity: latest.total_quantity,
     totalImpressions: latest.total_impressions,
@@ -221,7 +272,7 @@ function rowsForAiCheck(importId) {
     SELECT line, customer, brand, ref, color, po, season,
            line_quantity AS lineQuantity, input_date AS inputDate, output_date AS outputDate,
            model_code AS modelCode, ticket_number AS ticketNumber, planner,
-           print_count AS printCount, lead_time AS leadTime
+           print_count AS printCount, lead_time AS leadTime, contract_quantity AS contractQuantity
     FROM booking_rows
     WHERE import_id = ?
     ORDER BY id
@@ -229,11 +280,12 @@ function rowsForAiCheck(importId) {
 }
 
 function localAiCheck(importId, force = false) {
-  const imported = database.prepare('SELECT id, filename FROM imports WHERE id = ?').get(importId);
+  const imported = database.prepare('SELECT id, filename, sheet_check_json AS sheetCheckJson FROM imports WHERE id = ?').get(importId);
   if (!imported) return null;
   const saved = !force && database.prepare('SELECT report_json AS reportJson, engine_version AS engineVersion FROM ai_checks WHERE import_id = ?').get(importId);
   if (saved?.engineVersion === LOCAL_AI_VERSION) return JSON.parse(saved.reportJson);
-  const report = { ...analyzeBookingRows(rowsForAiCheck(importId)), importId, filename: imported.filename, source: 'sqlite' };
+  const sheetCheck = imported.sheetCheckJson ? JSON.parse(imported.sheetCheckJson) : null;
+  const report = { ...analyzeBookingRows(rowsForAiCheck(importId), { sheetCheck }), importId, filename: imported.filename, source: 'sqlite' };
   database.prepare(`
     INSERT INTO ai_checks(import_id, engine_version, score, status, checked_at, report_json)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -440,7 +492,7 @@ export function sqliteApi() {
         if (request.method === 'GET') return sendJson(response, 200, { files: listFiles() });
         if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
         try {
-          const { fileId, category } = JSON.parse(await readBody(request));
+          const { fileId, category, note } = JSON.parse(await readBody(request));
           const file = database.prepare('SELECT * FROM file_history WHERE id = ?').get(fileId ?? null);
           if (!file) return sendJson(response, 404, { error: 'Không tìm thấy file.' });
           const expected = file.category === 'original' ? 'processed' : file.category === 'processed' ? 'delivered' : null;
@@ -448,11 +500,22 @@ export function sqliteApi() {
           database.prepare(`
             INSERT OR IGNORE INTO file_history(import_id, category, filename, note)
             VALUES (?, ?, ?, ?)
-          `).run(file.import_id, category, file.filename, category === 'processed' ? 'Người dùng xác nhận đã xử lý.' : 'Người dùng xác nhận đã giao.');
+          `).run(
+            file.import_id, category, file.filename,
+            typeof note === 'string' && note.trim() ? note.trim().slice(0, 300) : category === 'processed' ? 'Người dùng xác nhận đã xử lý.' : 'Người dùng xác nhận đã giao.'
+          );
           return sendJson(response, 200, { files: listFiles() });
         } catch (error) {
           return sendJson(response, 400, { error: error.message || 'Không thể cập nhật file.' });
         }
+      });
+
+      server.middlewares.use('/api/booking-rows', (request, response) => {
+        if (request.method !== 'GET') return sendJson(response, 405, { error: 'Method not allowed' });
+        const importId = Number(new URL(request.url, 'http://local').searchParams.get('id'));
+        const imported = importId && database.prepare('SELECT id, filename FROM imports WHERE id = ?').get(importId);
+        if (!imported) return sendJson(response, 404, { error: 'Không tìm thấy lần nhập booking.' });
+        return sendJson(response, 200, { filename: imported.filename, days: bookingDaysFor(importId), rows: bookingRowsFor(importId) });
       });
 
       server.middlewares.use('/api/changes', async (request, response) => {
@@ -468,26 +531,50 @@ export function sqliteApi() {
         }
       });
 
-      server.middlewares.use('/api/warehouse', async (request, response) => {
-        if (request.method === 'GET') {
-          const latest = database.prepare(`
-            SELECT filename, strftime('%Y-%m-%dT%H:%M:%fZ', imported_at) AS importedAt, lines_json AS linesJson
-            FROM warehouse_snapshots ORDER BY id DESC LIMIT 1
-          `).get();
-          return sendJson(response, 200, latest
-            ? { filename: latest.filename, importedAt: latest.importedAt, lines: JSON.parse(latest.linesJson) }
-            : { filename: null, importedAt: null, lines: [] });
-        }
+      server.middlewares.use('/api/sources', async (request, response) => {
+        const kind = new URL(request.url, 'http://local').searchParams.get('kind');
+        if (!SOURCE_KINDS.has(kind)) return sendJson(response, 400, { error: 'Loại nguồn dữ liệu không hợp lệ.' });
+        if (request.method === 'GET') return sendJson(response, 200, latestSource(kind));
         if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
         try {
           const payload = JSON.parse(await readBody(request));
           if (!payload.filename || !Array.isArray(payload.lines) || !payload.lines.length) {
-            return sendJson(response, 400, { error: 'File kho không có dòng hợp lệ.' });
+            return sendJson(response, 400, { error: 'File không có dòng dữ liệu hợp lệ.' });
           }
-          database.prepare('INSERT INTO warehouse_snapshots(filename, lines_json) VALUES (?, ?)').run(payload.filename, JSON.stringify(payload.lines));
-          return sendJson(response, 201, { filename: payload.filename, importedAt: new Date().toISOString(), lines: payload.lines });
+          database.prepare('INSERT INTO source_snapshots(kind, filename, origin, lines_json) VALUES (?, ?, ?, ?)')
+            .run(kind, payload.filename, payload.origin || null, JSON.stringify(payload.lines));
+          return sendJson(response, 201, latestSource(kind));
         } catch (error) {
-          return sendJson(response, 500, { error: error.message || 'Không thể lưu file kho.' });
+          return sendJson(response, 500, { error: error.message || 'Không thể lưu nguồn dữ liệu.' });
+        }
+      });
+
+      // Downloads a workbook from a share link on behalf of the browser, which CORS would block.
+      server.middlewares.use('/api/fetch-url', async (request, response) => {
+        if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
+        try {
+          const { url } = JSON.parse(await readBody(request));
+          const target = directDownloadUrl(String(url || ''));
+          if (isPrivateHost(new URL(target).hostname)) return sendJson(response, 400, { error: 'Không tải file từ địa chỉ nội bộ.' });
+          const upstream = await fetch(target, { redirect: 'follow' });
+          const type = upstream.headers.get('content-type') || '';
+          if (upstream.status === 401 || upstream.status === 403) {
+            return sendJson(response, 403, { error: 'Link yêu cầu đăng nhập (SharePoint/OneDrive nội bộ). Hãy đặt quyền chia sẻ “Bất kỳ ai có link” hoặc tải file về rồi chọn file.' });
+          }
+          if (!upstream.ok) return sendJson(response, 502, { error: `Không tải được file (HTTP ${upstream.status}).` });
+          if (type.includes('text/html')) {
+            return sendJson(response, 415, { error: 'Link trả về trang web chứ không phải file Excel. Hãy dùng link tải trực tiếp hoặc tải file về.' });
+          }
+          const bytes = Buffer.from(await upstream.arrayBuffer());
+          if (bytes.length > 60_000_000) return sendJson(response, 413, { error: 'File quá lớn (trên 60 MB).' });
+          const disposition = upstream.headers.get('content-disposition') || '';
+          const filename = decodeURIComponent(disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1] || disposition.match(/filename="?([^";]+)"?/i)?.[1] || new URL(target).pathname.split('/').pop() || 'file.xlsx');
+          response.statusCode = 200;
+          response.setHeader('Content-Type', 'application/octet-stream');
+          response.setHeader('X-Filename', encodeURIComponent(filename));
+          return response.end(bytes);
+        } catch (error) {
+          return sendJson(response, 400, { error: error.message || 'Link không hợp lệ.' });
         }
       });
 
@@ -506,20 +593,24 @@ export function sqliteApi() {
           );
 
           const previous = database.prepare('SELECT id, filename FROM imports ORDER BY id DESC LIMIT 1').get();
-          const report = previous ? diffBookingRows(bookingRowsFor(previous.id), compactRows(payload.rows)) : null;
+          const days = Array.isArray(payload.days) ? payload.days : [];
+          const report = previous
+            ? diffBookingRows(bookingRowsFor(previous.id), compactRows(payload.rows), { previousDays: bookingDaysFor(previous.id), currentDays: days })
+            : null;
 
           database.exec('BEGIN IMMEDIATE');
           try {
             const imported = database.prepare(`
-              INSERT INTO imports(filename, row_count, total_quantity, total_impressions)
-              VALUES (?, ?, ?, ?)
-            `).run(payload.filename, payload.rows.length, totalQuantity, totalImpressions);
+              INSERT INTO imports(filename, row_count, total_quantity, total_impressions, sheet_check_json, days_json)
+              VALUES (?, ?, ?, ?, ?, ?)
+            `).run(payload.filename, payload.rows.length, totalQuantity, totalImpressions, payload.sheetCheck ? JSON.stringify(payload.sheetCheck) : null, JSON.stringify(days));
 
             const insertRow = database.prepare(`
               INSERT INTO booking_rows(
                 import_id, line, customer, brand, ref, color, po, season, line_quantity,
-                input_date, output_date, model_code, ticket_number, planner, print_count, lead_time, contract_quantity
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                input_date, output_date, model_code, ticket_number, planner, print_count, lead_time, contract_quantity,
+                allocations_json
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `);
             for (const row of payload.rows) {
               insertRow.run(
@@ -539,7 +630,8 @@ export function sqliteApi() {
                 row.planner ?? null,
                 Number(row.printCount || 0),
                 row.leadTime ?? null,
-                row.contractQuantity ?? null
+                row.contractQuantity ?? null,
+                row.allocations && Object.keys(row.allocations).length ? JSON.stringify(row.allocations) : null
               );
             }
             database.prepare(`

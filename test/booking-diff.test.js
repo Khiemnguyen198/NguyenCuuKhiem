@@ -29,3 +29,14 @@ test('keeps repeated PO rows apart by occurrence', () => {
   const diff = diffBookingRows([row('PO1', 100), row('PO1', 40)], [row('PO1', 100), row('PO1', 40), row('PO1', 10)]);
   assert.deepEqual(diff.counts, { added: 1, removed: 0, changed: 0 });
 });
+
+test('compares daily allocations by date when day columns shift', () => {
+  const previousDays = [{ date: '2026-10-26' }, { date: '2026-10-27' }];
+  const currentDays = [{ date: '2026-10-25' }, { date: '2026-10-26' }, { date: '2026-10-27' }];
+  const before = [row('PO1', 100, '2026-11-01', { allocations: { 0: 60, 1: 40 } })];
+  const same = [row('PO1', 100, '2026-11-01', { allocations: { 1: 60, 2: 40 } })];
+  const moved = [row('PO1', 100, '2026-11-01', { allocations: { 1: 100 } })];
+  assert.equal(diffBookingRows(before, same, { previousDays, currentDays }).hasChanges, false);
+  const change = diffBookingRows(before, moved, { previousDays, currentDays }).changed[0].changes[0];
+  assert.deepEqual([change.field, change.before, change.after], ['allocations', '26/10: 60; 27/10: 40', '26/10: 100']);
+});

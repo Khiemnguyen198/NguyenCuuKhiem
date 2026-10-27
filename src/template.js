@@ -1,5 +1,6 @@
 import { MACHINE_SUGGESTIONS } from './config-ai.js';
 import { STATUS_FILTERS } from './models-view.js';
+import { renderSourceCards } from './sources.js';
 
 export function appTemplate({ isStaticPages, dayLabel, weekLabel }) {
   return `
@@ -22,7 +23,7 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel }) {
             <p class="eyebrow" id="pageEyebrow">KHẢ NĂNG GIAO HÀNG</p>
             <h1 id="pageTitle">Tổng quan</h1>
           </div>
-          <button class="primary-button" id="importButton"><i class="ph ph-upload-simple"></i>Nhập file booking</button>
+          <button class="primary-button" id="importButton" hidden><i class="ph ph-upload-simple"></i>Nhập file booking</button>
           <button class="back-button" id="backToPlans" hidden><i class="ph ph-arrow-left"></i>Danh sách kế hoạch</button>
           <input id="fileInput" type="file" accept=".xlsx,.xls" hidden />
         </div>
@@ -43,9 +44,8 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel }) {
       <section class="models-view" id="modelsView" hidden>
         <section class="delivery-summary">
           <div class="delivery-summary__heading">
-            <div><p class="section-heading__overline">TIẾN ĐỘ GIAO BÁN THÀNH PHẨM</p><h2>Booking, nhận, in và giao theo từng mã hàng</h2><p id="warehouseMeta">Chưa có file kế toán kho. Nhấn “Nhập file kho” để tải sheet TỔNG HỢP.</p></div>
-            <button class="primary-button" id="importWarehouse"><i class="ph ph-warehouse"></i>Nhập file kho</button>
-            <input id="warehouseFileInput" type="file" accept=".xlsx,.xlsm,.xls" hidden />
+            <div><p class="section-heading__overline">TIẾN ĐỘ GIAO BÁN THÀNH PHẨM</p><h2>Booking, nhận, in và giao theo từng mã hàng</h2><p id="warehouseMeta">Chưa có dữ liệu nhận/giao. Nhập ở mục Tổng quan → Nguồn dữ liệu.</p></div>
+            <button class="primary-button" data-export><i class="ph ph-microsoft-excel-logo"></i>Xuất file tổng hợp</button>
           </div>
           <div class="delivery-kpis delivery-kpis--six" id="modelKpis"></div>
         </section>
@@ -56,6 +56,7 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel }) {
         <section class="delivery-summary">
           <div class="model-filters">
             <label class="model-search"><i class="ph ph-magnifying-glass"></i><input id="modelSearch" type="search" placeholder="Tìm mã hàng, màu, khách hàng…" /></label>
+            <select data-batch-select aria-label="Chọn đợt booking"></select>
             <select id="customerFilter" aria-label="Lọc theo khách hàng"><option value="">Tất cả khách hàng</option></select>
             <div class="status-filters" id="statusFilters" role="group" aria-label="Lọc theo trạng thái">${STATUS_FILTERS.map(([value, label]) => `<button type="button" data-status="${value}"${value === 'open' ? ' aria-pressed="true"' : ''}>${label}<span data-status-count="${value}"></span></button>`).join('')}</div>
           </div>
@@ -65,20 +66,23 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel }) {
       </section>
 
       <section class="overview-view" id="overviewView">
+        <section class="delivery-summary sources-panel">
+          <div class="delivery-summary__heading">
+            <div><p class="section-heading__overline">NGUỒN DỮ LIỆU</p><h2>Nhập booking, nhận và giao</h2><p>Mỗi nguồn nhận file Excel hoặc link. Nhập lại bất cứ lúc nào để cập nhật số liệu.</p></div>
+            <button class="primary-button" data-export><i class="ph ph-microsoft-excel-logo"></i>Xuất file tổng hợp</button>
+          </div>
+          <div class="source-grid">${renderSourceCards()}</div>
+        </section>
         <section class="delivery-summary">
           <div class="delivery-summary__heading">
-            <div><p class="section-heading__overline">KẾT QUẢ TỔNG HỢP</p><h2>Booking và khả năng đáp ứng</h2><p>Đối chiếu nhu cầu khách hàng với năng lực máy đã cấu hình.</p></div>
-            <div class="assurance-badge assurance-badge--pending" id="overviewAssurance"><i class="ph ph-info"></i><span><small>Kết luận</small><strong>Chưa đủ cấu hình</strong></span></div>
+            <div><p class="section-heading__overline">KẾT QUẢ TỔNG HỢP</p><h2>Booking, nhận, in và giao</h2><p id="overviewMeta">Số liệu thực tế từ file nhận và file giao, đối chiếu với booking.</p></div>
+            <label class="batch-picker"><span>Đợt booking</span><select data-batch-select aria-label="Chọn đợt booking"></select></label>
           </div>
-          <div class="delivery-kpis">
-            <div><span>Booking yêu cầu</span><strong id="overviewBooking">—</strong><small>sản phẩm</small></div>
-            <div><span>Lượt hình cần in</span><strong id="overviewImpressions">—</strong><small>lượt hình</small></div>
-            <div><span>Có thể in</span><strong id="overviewPrintable">—</strong><small>sản phẩm ước tính</small></div>
-            <div><span>Có thể giao đúng hạn</span><strong id="overviewDeliverable">—</strong><small id="overviewShortage">Cần cấu hình định mức</small></div>
-          </div>
+          <div class="delivery-kpis delivery-kpis--six" id="overviewKpis"></div>
+          <div class="warning-strip" id="overviewWarnings"></div>
           <div class="leadtime-summary">
-            <div class="leadtime-summary__head"><strong>Theo leadtime booking</strong><span>Nhà máy làm Thứ 2–Thứ 7, bỏ qua Chủ Nhật</span></div>
-            <div class="table-wrap"><table class="delivery-table"><thead><tr><th>Leadtime</th><th class="th-left">Khách hàng</th><th>Số mã</th><th>Số hợp đồng</th><th>Tổng đơn hàng</th><th>Nhập</th><th>Xuất (có thể giao)</th><th>Thiếu</th><th>Kết luận</th></tr></thead><tbody id="overviewLeadtimeBody"></tbody></table></div>
+            <div class="leadtime-summary__head"><strong>Theo leadtime booking</strong><span>Đã nhận / giao đạt là lũy kế theo mã hàng · Nhà máy làm Thứ 2–Thứ 7</span></div>
+            <div class="table-wrap"><table class="delivery-table"><thead><tr><th>Leadtime</th><th class="th-left">Khách hàng</th><th>Số mã</th><th>Số hợp đồng</th><th>Tổng đơn hàng</th><th>Ngày nhận (INPUT)</th><th>Hạn giao (OUTPUT)</th><th>Đã nhận BTP</th><th>Giao đạt</th><th class="th-left">Tình trạng mã</th></tr></thead><tbody id="overviewLeadtimeBody"></tbody></table></div>
           </div>
         </section>
         <div class="overview-intro">
@@ -162,23 +166,16 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel }) {
           <section class="metrics" aria-label="Tổng quan dữ liệu">
             <div class="metric"><strong id="totalQuantity">—</strong><span>Booking yêu cầu</span><small id="rowCount">— dòng booking</small></div>
             <div class="metric"><strong id="totalImpressions">—</strong><span>Lượt hình cần in</span><small>Từ file booking</small></div>
-            <div class="metric"><strong id="printableQuantity">—</strong><span>Có thể in</span><small>Sản phẩm ước tính</small></div>
-            <div class="metric"><strong id="deliverableQuantity">—</strong><span>Có thể giao đúng hạn</span><small id="planShortage">Chờ cấu hình định mức</small></div>
+            <div class="metric"><strong id="planReceived">—</strong><span>Đã nhận BTP</span><small id="planReceivedMeta">Các mã trong file này</small></div>
+            <div class="metric"><strong id="planGood">—</strong><span>Giao đạt</span><small id="planGoodMeta">Các mã trong file này</small></div>
           </section>
 
           <section class="capacity-panel">
             <div class="section-heading">
-              <div><p class="section-heading__overline">ĐỐI CHIẾU KẾ HOẠCH</p><h2>Khả năng đáp ứng theo leadtime</h2></div>
-              <button class="capacity-config-link" id="settingsShortcut"><i class="ph ph-sliders-horizontal"></i><span><strong id="machinesRequired">Cấu hình năng lực</strong><small id="machineMetricMeta">Nhập phút và số máy</small></span></button>
+              <div><p class="section-heading__overline">ĐỐI CHIẾU KẾ HOẠCH</p><h2>Tiến độ theo leadtime</h2></div>
             </div>
-            <div class="capacity-facts">
-              <div><span>Tổng phút cần</span><strong id="requiredMinutes">—</strong></div>
-              <div><span>Tổng phút có thể chạy</span><strong id="availableMinutes">—</strong></div>
-              <div><span>Mức đáp ứng</span><strong id="coverageRate">—</strong></div>
-              <div class="plan-assurance" id="planAssurance"><span>Kết luận</span><strong>Chưa đủ cấu hình</strong></div>
-            </div>
-            <div class="table-wrap"><table class="delivery-table"><thead><tr><th>Leadtime</th><th class="th-left">Khách hàng</th><th>Số mã</th><th>Số hợp đồng</th><th>Tổng đơn hàng</th><th>Nhập</th><th>Xuất (có thể giao)</th><th>Thiếu</th><th>Kết luận</th></tr></thead><tbody id="planLeadtimeBody"></tbody></table></div>
-            <div class="calculation-note"><i class="ph ph-info"></i><span>Kết quả là ước tính từ định mức đang chọn. Cần xác nhận số phút, số máy, ca làm và hiệu suất với sản xuất trước khi chốt kế hoạch.</span></div>
+            <div class="table-wrap"><table class="delivery-table"><thead><tr><th>Leadtime</th><th class="th-left">Khách hàng</th><th>Số mã</th><th>Số hợp đồng</th><th>Tổng đơn hàng</th><th>Ngày nhận (INPUT)</th><th>Hạn giao (OUTPUT)</th><th>Đã nhận BTP</th><th>Giao đạt</th><th class="th-left">Tình trạng mã</th></tr></thead><tbody id="planLeadtimeBody"></tbody></table></div>
+            <div class="calculation-note"><i class="ph ph-info"></i><span>Đã nhận và giao đạt lấy từ file nhận / file giao mới nhất, cộng dồn theo mã hàng + màu.</span></div>
           </section>
         </div>
 
@@ -207,31 +204,6 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel }) {
         <button type="button" class="secondary-button" data-close-changes>Đóng</button>
         <button type="button" class="primary-button" id="markReviewed"><i class="ph ph-check-circle"></i>Đã kiểm tra</button>
       </footer>
-    </section>
-  </div>
-  <div class="modal" id="settingsModal" aria-hidden="true">
-    <button class="modal__backdrop" data-close-settings aria-label="Đóng cấu hình"></button>
-    <section class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
-      <header class="settings-dialog__header">
-        <div><p class="section-heading__overline">ĐỊNH MỨC SẢN XUẤT</p><h2 id="settingsTitle">Tính phút và số máy</h2></div>
-        <button class="icon-button" data-close-settings aria-label="Đóng"><i class="ph ph-x"></i></button>
-      </header>
-      <form id="settingsForm">
-        <div class="settings-grid">
-          <label><span>Phút / lượt hình</span><input name="minutesPerImpression" type="number" min="0.0001" step="0.0001" required placeholder="Ví dụ: 0,25" /><small>Định mức thời gian cho một lượt hình in.</small></label>
-          <label><span>Phút setup / PO</span><input name="setupMinutesPerPo" type="number" min="0" step="0.1" required /></label>
-          <label><span>Số máy hiện có</span><input name="machineCount" type="number" min="1" step="1" required /></label>
-          <label><span>Số ca / ngày</span><input name="shiftsPerDay" type="number" min="1" step="1" required /></label>
-          <label><span>Phút / ca</span><input name="minutesPerShift" type="number" min="1" step="1" required /></label>
-          <label><span>Hiệu suất máy (%)</span><input name="efficiencyPercent" type="number" min="1" max="100" step="0.1" required /></label>
-          <label><span>Số ngày kế hoạch</span><input name="planningDays" type="number" min="1" step="1" required /><small>Tính từ Thứ Hai đến Thứ Bảy; Chủ Nhật nghỉ.</small></label>
-        </div>
-        <div class="calculation-preview" id="calculationPreview"></div>
-        <footer class="settings-dialog__footer">
-          <button type="button" class="secondary-button" data-close-settings>Hủy</button>
-          <button type="submit" class="primary-button"><i class="ph ph-floppy-disk"></i>Lưu & tính lại</button>
-        </footer>
-      </form>
     </section>
   </div>
   <div class="toast" id="toast" role="status"></div>
