@@ -32,6 +32,7 @@ Always pull `master` before editing. Do not treat the GPT Sites deployment as th
 - User-confirmed processed and delivered events with timestamps; originals are retained and duplicate actions are ignored.
 - Static builds persist file metadata and status history in browser storage; Node development persists events in SQLite.
 - Two-level planning flow: the Kế hoạch section lists imported plan files first, then opens the selected import's scheduling dashboard.
+- Lightweight local AI checker for missing or invalid values, date order, duplicate rows, unsupported lead times, and quantity outliers; SQLite stores one report per import.
 - GitHub Pages deployment workflow.
 - Production builds use browser storage for capacity settings and browser-only workbook import on static hosting, including GPT Sites at the root URL.
 

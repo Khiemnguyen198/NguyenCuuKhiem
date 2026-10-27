@@ -17,6 +17,19 @@ Mở `http://localhost:4173` trong trình duyệt.
 2. Chọn workbook `.xlsx` có sheet `TH`, hoặc các sheet `LEADTIME 1/2/3/5 NGÀY`.
 3. Ứng dụng đọc các cột booking, lưu phiên nhập vào `.data/planner.db`, rồi cập nhật số dòng, tổng sản lượng và tổng lượt hình.
 4. Mở mục **Kế hoạch**, chọn đúng file trong danh sách để vào bảng điều phối của lần import đó.
+5. Khung **AI Local** tự kiểm tra dữ liệu trong SQLite và liệt kê các dòng cần xem lại.
+
+## AI Local kiểm tra file
+
+Bộ kiểm tra chạy hoàn toàn trong ứng dụng, không gọi API và không gửi dữ liệu booking ra ngoài. Phiên bản nhẹ hiện tại phát hiện:
+
+- Thiếu PO, số lượng hoặc lượt hình in không hợp lệ.
+- Lead time ngoài nhóm 1, 2, 3 và 5 ngày.
+- Ngày OUTPUT sớm hơn ngày INPUT.
+- Dòng có khả năng bị trùng.
+- Sản lượng ngoại lệ theo phân bố của file.
+
+Khi chạy local, báo cáo được lưu trong bảng `ai_checks` của SQLite theo từng lần import. Trên website tĩnh, báo cáo được tính và lưu trong trình duyệt cùng metadata của file.
 
 Mục **Tổng quan** phân loại lịch sử file thành:
 

@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { defineConfig } from 'vite';
+import { analyzeBookingRows, LOCAL_AI_VERSION } from './src/local-ai.js';
 
 const dataDirectory = resolve('.data');
 mkdirSync(dataDirectory, { recursive: true });
@@ -61,6 +62,14 @@ database.exec(`
     UNIQUE(import_id, category, filename)
   );
   CREATE INDEX IF NOT EXISTS file_history_category ON file_history(category, created_at DESC);
+  CREATE TABLE IF NOT EXISTS ai_checks (
+    import_id INTEGER PRIMARY KEY REFERENCES imports(id) ON DELETE CASCADE,
+    engine_version TEXT NOT NULL,
+    score INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    report_json TEXT NOT NULL
+  );
   INSERT OR IGNORE INTO file_history(import_id, category, filename, created_at, note)
     SELECT id, 'original', filename, imported_at, 'File tải lên được giữ nguyên; hệ thống chỉ đọc dữ liệu.'
     FROM imports;
@@ -139,6 +148,37 @@ function currentSettings() {
   };
 }
 
+function rowsForAiCheck(importId) {
+  return database.prepare(`
+    SELECT line, customer, brand, ref, color, po, season,
+           line_quantity AS lineQuantity, input_date AS inputDate, output_date AS outputDate,
+           model_code AS modelCode, ticket_number AS ticketNumber, planner,
+           print_count AS printCount, lead_time AS leadTime
+    FROM booking_rows
+    WHERE import_id = ?
+    ORDER BY id
+  `).all(importId);
+}
+
+function localAiCheck(importId, force = false) {
+  const imported = database.prepare('SELECT id, filename FROM imports WHERE id = ?').get(importId);
+  if (!imported) return null;
+  const saved = !force && database.prepare('SELECT report_json AS reportJson, engine_version AS engineVersion FROM ai_checks WHERE import_id = ?').get(importId);
+  if (saved?.engineVersion === LOCAL_AI_VERSION) return JSON.parse(saved.reportJson);
+  const report = { ...analyzeBookingRows(rowsForAiCheck(importId)), importId, filename: imported.filename, source: 'sqlite' };
+  database.prepare(`
+    INSERT INTO ai_checks(import_id, engine_version, score, status, checked_at, report_json)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(import_id) DO UPDATE SET
+      engine_version = excluded.engine_version,
+      score = excluded.score,
+      status = excluded.status,
+      checked_at = excluded.checked_at,
+      report_json = excluded.report_json
+  `).run(importId, LOCAL_AI_VERSION, report.score, report.status, report.checkedAt, JSON.stringify(report));
+  return report;
+}
+
 function sqliteApi() {
   return {
     name: 'sqlite-api',
@@ -147,6 +187,21 @@ function sqliteApi() {
         if (request.method !== 'GET') return sendJson(response, 405, { error: 'Method not allowed' });
         const requestedId = Number(new URL(request.url, 'http://local').searchParams.get('id')) || null;
         sendJson(response, 200, latestDashboard(requestedId));
+      });
+
+      server.middlewares.use('/api/ai-check', (request, response) => {
+        if (request.method !== 'GET') return sendJson(response, 405, { error: 'Method not allowed' });
+        const url = new URL(request.url, 'http://local');
+        const importId = Number(url.searchParams.get('id'));
+        if (!importId) return sendJson(response, 400, { error: 'Thiếu mã lần nhập.' });
+        try {
+          const report = localAiCheck(importId, url.searchParams.get('force') === '1');
+          return report
+            ? sendJson(response, 200, report)
+            : sendJson(response, 404, { error: 'Không tìm thấy dữ liệu trong SQLite.' });
+        } catch (error) {
+          return sendJson(response, 500, { error: error.message || 'AI local không thể kiểm tra dữ liệu.' });
+        }
       });
 
       server.middlewares.use('/api/settings', async (request, response) => {
@@ -268,7 +323,9 @@ function sqliteApi() {
             database.exec('ROLLBACK');
             throw error;
           }
-          sendJson(response, 201, latestDashboard());
+          const dashboard = latestDashboard();
+          localAiCheck(dashboard.importId, true);
+          sendJson(response, 201, dashboard);
         } catch (error) {
           sendJson(response, 500, { error: error.message || 'Không thể lưu dữ liệu.' });
         }

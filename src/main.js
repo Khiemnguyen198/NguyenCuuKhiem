@@ -1,6 +1,7 @@
 import '@phosphor-icons/web/regular';
 import * as XLSX from 'xlsx';
 import './styles.css';
+import { analyzeBookingRows } from './local-ai.js';
 
 const formatNumber = new Intl.NumberFormat('vi-VN');
 const isStaticPages = import.meta.env.PROD || import.meta.env.BASE_URL !== '/';
@@ -27,6 +28,7 @@ const defaultSettings = {
 
 let dashboardState = fallbackDashboard;
 let settingsState = { ...defaultSettings };
+let activeImportId = fallbackDashboard.importId;
 let fileHistoryState = [{
   id: 'demo-original',
   importId: 'demo-plan',
@@ -155,7 +157,7 @@ document.querySelector('#app').innerHTML = `
           <section class="file-strip" aria-live="polite">
             <div class="file-icon"><i class="ph ph-file-xls"></i></div>
             <div class="file-strip__copy"><strong id="filename">Đang tải dữ liệu…</strong><span id="fileMeta">Kết nối SQLite</span></div>
-            <div class="valid-state"><i class="ph ph-check-circle"></i><div><strong>Dữ liệu hợp lệ</strong><span>Sẵn sàng lập kế hoạch</span></div></div>
+            <div class="valid-state" id="dataCheckState"><i class="ph ph-brain"></i><div><strong id="dataCheckTitle">AI local sẵn sàng</strong><span id="dataCheckMeta">Kiểm tra trực tiếp trên thiết bị</span></div></div>
           </section>
 
           <section class="metrics" aria-label="Tổng quan dữ liệu">
@@ -180,17 +182,11 @@ document.querySelector('#app').innerHTML = `
           </section>
         </div>
 
-        <aside class="issues-panel">
-          <div class="issues-panel__title"><h2>Cần xử lý</h2><span>3</span></div>
-          <button class="issue issue--danger">
-            <i class="ph ph-warning-circle"></i><div><strong>Vượt công suất ngày 26/10</strong><span>Hạn giao 1 ngày đang ở 120%</span><small>Cần điều phối thêm máy hoặc dời đơn</small></div><i class="ph ph-caret-right"></i>
-          </button>
-          <button class="issue issue--warning">
-            <i class="ph ph-warning"></i><div><strong>Nguy cơ quá tải ngày 27/10</strong><span>Hạn giao 2 ngày ở 93%</span><small>Cân nhắc điều chuyển sản lượng</small></div><i class="ph ph-caret-right"></i>
-          </button>
-          <button class="issue issue--warning">
-            <i class="ph ph-clock-countdown"></i><div><strong>Dữ liệu thiếu định mức</strong><span>Còn 12 mã chưa có định mức thời gian</span><small>Vui lòng cấu hình để tính máy cần</small></div><i class="ph ph-caret-right"></i>
-          </button>
+        <aside class="issues-panel ai-panel">
+          <div class="issues-panel__title"><div><p>AI LOCAL</p><h2>Kiểm tra file</h2></div><span id="aiScore">—</span></div>
+          <div class="ai-privacy"><i class="ph ph-shield-check"></i><span>Chạy cục bộ · Không gửi dữ liệu ra ngoài</span></div>
+          <div class="ai-findings" id="aiFindings"><div class="ai-empty"><i class="ph ph-brain"></i><strong>Chọn file để kiểm tra</strong><span>AI local sẽ rà soát dữ liệu đã lưu trong SQLite.</span></div></div>
+          <button class="ai-refresh" id="runAiCheck"><i class="ph ph-arrows-clockwise"></i>Kiểm tra lại</button>
         </aside>
       </div>
     </main>
@@ -262,7 +258,7 @@ function toIsoDate(value) {
 function readRowsFromSheet(sheet, range, leadTimeOverride = null) {
   const records = XLSX.utils.sheet_to_json(sheet, { range, defval: null, raw: true });
   return records
-    .filter((row) => row.LINE != null && row.PO != null && Number(row['LINE QTY']) >= 0)
+    .filter((row) => row.LINE != null && [row.PO, row.REF, row['MODEL CODE'], row['LINE QTY']].some((value) => value != null && value !== ''))
     .map((row) => ({
       line: String(row.LINE ?? ''),
       customer: String(row.CUS ?? ''),
@@ -437,6 +433,7 @@ function showPage(pageName) {
 }
 
 async function openPlanDetail(importId = null) {
+  activeImportId = importId || fallbackDashboard.importId;
   document.querySelector('#overviewView').hidden = true;
   document.querySelector('#planListView').hidden = true;
   document.querySelector('#planningView').hidden = false;
@@ -444,6 +441,55 @@ async function openPlanDetail(importId = null) {
   document.querySelector('#pageEyebrow').textContent = 'KẾ HOẠCH SẢN XUẤT';
   document.querySelector('#pageTitle').textContent = 'Điều phối kế hoạch';
   await loadDashboard(importId);
+  await loadAiCheck(activeImportId);
+}
+
+function aiStatusCopy(report) {
+  if (report.status === 'good') return { title: 'Dữ liệu tốt', meta: 'Không phát hiện lỗi đáng kể', icon: 'ph-check-circle' };
+  if (report.status === 'review') return { title: 'Nên kiểm tra lại', meta: `${formatNumber.format(report.findingCount)} điểm cần chú ý`, icon: 'ph-warning' };
+  if (report.status === 'danger') return { title: 'Có lỗi cần xử lý', meta: `${formatNumber.format(report.findingCount)} bất thường được phát hiện`, icon: 'ph-warning-circle' };
+  return { title: 'Chưa có dữ liệu', meta: 'Nhập file booking để bắt đầu', icon: 'ph-info' };
+}
+
+function renderAiCheck(report) {
+  const copy = aiStatusCopy(report);
+  const state = document.querySelector('#dataCheckState');
+  state.dataset.status = report.status;
+  state.querySelector('i').className = `ph ${copy.icon}`;
+  document.querySelector('#dataCheckTitle').textContent = copy.title;
+  document.querySelector('#dataCheckMeta').textContent = copy.meta;
+  const score = document.querySelector('#aiScore');
+  score.textContent = report.score == null ? '—' : report.score;
+  score.dataset.status = report.status;
+  const container = document.querySelector('#aiFindings');
+  if (!report.findings?.length) {
+    container.innerHTML = `<div class="ai-empty ai-empty--good"><i class="ph ph-${report.status === 'empty' ? 'database' : 'check-circle'}"></i><strong>${report.status === 'empty' ? 'Chưa có kết quả kiểm tra' : 'Không phát hiện bất thường'}</strong><span>${report.status === 'empty' ? 'File mẫu không nằm trong SQLite. Hãy nhập file booking thật.' : `Đã rà soát ${formatNumber.format(report.rowCount)} dòng booking.`}</span></div>`;
+    return;
+  }
+  container.innerHTML = report.findings.map((finding) => `
+    <article class="ai-finding ai-finding--${escapeHtml(finding.severity)}">
+      <i class="ph ph-${finding.severity === 'danger' ? 'warning-circle' : finding.severity === 'warning' ? 'warning' : 'chart-line-up'}"></i>
+      <div><strong>${escapeHtml(finding.title)}</strong><span>${formatNumber.format(finding.count)} dòng · ${escapeHtml(finding.description)}</span>${finding.samples?.length ? `<small>Ví dụ: ${finding.samples.map((sample) => `dòng ${formatNumber.format(sample.row)} / PO ${escapeHtml(sample.po)}`).join(', ')}</small>` : ''}</div>
+    </article>
+  `).join('');
+}
+
+async function loadAiCheck(importId, force = false) {
+  document.querySelector('#aiFindings').innerHTML = '<div class="ai-empty"><i class="ph ph-spinner-gap spin"></i><strong>AI local đang kiểm tra</strong><span>Đọc dữ liệu booking và tìm điểm bất thường…</span></div>';
+  try {
+    if (isStaticPages) {
+      const file = fileHistoryState.find((item) => item.category === 'original' && String(item.importId) === String(importId));
+      renderAiCheck(file?.aiReport || { status: 'empty', score: null, rowCount: 0, findingCount: 0, findings: [] });
+      return;
+    }
+    const response = await fetch(`/api/ai-check?id=${encodeURIComponent(importId)}${force ? '&force=1' : ''}`);
+    const report = await response.json();
+    if (!response.ok) throw new Error(report.error || 'Không thể kiểm tra file.');
+    renderAiCheck(report);
+  } catch (error) {
+    renderAiCheck({ status: 'empty', score: null, rowCount: 0, findingCount: 0, findings: [] });
+    showToast(error.message, 'error');
+  }
 }
 
 function calculateCapacity(data, settings) {
@@ -598,6 +644,7 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
     if (isStaticPages) {
       const importId = crypto.randomUUID();
       localPayload.importId = importId;
+      const aiReport = analyzeBookingRows(rows);
       const files = [{
         id: importId,
         importId,
@@ -608,6 +655,7 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
         totalQuantity: localPayload.totalQuantity,
         totalImpressions: localPayload.totalImpressions,
         uniquePo: localPayload.uniquePo,
+        aiReport,
         note: 'Chỉ lưu thông tin file; file Excel gốc không bị thay đổi.'
       }, ...fileHistoryState.filter((item) => item.id !== 'demo-original')];
       saveBrowserFiles(files);
@@ -657,6 +705,12 @@ document.querySelector('#planFiles').addEventListener('click', (event) => {
   if (plan) openPlanDetail(plan.dataset.planId);
 });
 document.querySelector('#backToPlans').addEventListener('click', () => showPage('Kế hoạch'));
+document.querySelector('#runAiCheck').addEventListener('click', async () => {
+  const button = document.querySelector('#runAiCheck');
+  button.disabled = true;
+  await loadAiCheck(activeImportId, true);
+  button.disabled = false;
+});
 
 document.querySelector('#settingsShortcut').addEventListener('click', openSettings);
 document.querySelectorAll('[data-close-settings]').forEach((button) => button.addEventListener('click', closeSettings));
