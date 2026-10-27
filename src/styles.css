@@ -202,7 +202,8 @@ button.warning-chip { cursor: pointer; }
 .model-row:hover td, .model-row:hover th, .customer-row:hover th, .customer-row:hover td { background: #f6f9fb; }
 .model-row:focus-visible, .customer-row:focus-visible { outline: 2px solid var(--navy-800); outline-offset: -2px; }
 .model-row--expanded td, .model-row--expanded th, .customer-row--active th, .customer-row--active td { background: #eef5fa; }
-.model-cell { text-align: left !important; min-width: 170px; }
+.model-cell { text-align: left !important; min-width: 90px; }
+.color-cell { max-width: 260px; overflow: hidden; color: #29445f; text-align: left !important; text-overflow: ellipsis; white-space: nowrap; }
 .model-cell strong { color: var(--ink); font-size: 12px; }
 .model-cell small { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .progress-cell { min-width: 96px; }

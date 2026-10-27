@@ -22,7 +22,7 @@ Mở `http://localhost:4173` trong trình duyệt.
 2. AI local kiểm tra booking; cảnh báo hiện ngay dưới các chỉ số.
 3. Ứng dụng nối 3 nguồn theo **mã hàng + màu** và tính cho từng mã: SL hợp đồng, đã nhận, đã in, giao đạt, lỗi, còn thiếu, hạn giao, trạng thái.
 4. **Đợt booking**: chọn một tuần (theo ngày PXC CHUYỂN, Thứ Hai–Chủ Nhật) để chỉ theo dõi các dòng phân bổ trong tuần đó; số lượng là phần phân bổ của đợt, hạn giao là ngày PXI TRẢ. Mặc định là tuần hiện tại. Số đã nhận / giao đạt vẫn là lũy kế theo mã hàng vì file nhận/giao không tách theo đợt.
-5. **Xuất file tổng hợp** tạo một workbook gồm `TỔNG QUAN`, `BOOKING` (đủ cột như sheet TH: LINE → Leadtime, tiến độ theo mã, các cột ngày với dòng PXC CHUYỂN / PXI TRẢ / TỔNG TUẦN / TỔNG NGÀY), `THEO MÃ HÀNG`, `THEO KHÁCH HÀNG`, `CẢNH BÁO`, `THAY ĐỔI BOOKING`. Khi đang chọn một đợt, file chỉ gồm đợt đó. Booking mới nhất được chuyển sang mục **File đã làm**.
+5. **Xuất file tổng hợp** tạo một workbook mở đầu bằng sheet `TH` giống hệt sheet TH của file booking (tiêu đề ở dòng 1 và 5, PXC CHUYỂN / PXI TRẢ / TỔNG TUẦN / TỔNG NGÀY ở dòng 1–4, dòng trống giữa các nhóm leadtime; TỔNG NGÀY/TỔNG TUẦN được tính lại đúng), cột tiến độ theo mã đặt sau các cột ngày; tiếp theo là `TỔNG QUAN`, `THEO MÃ HÀNG`, `THEO KHÁCH HÀNG`, `CẢNH BÁO`, `THAY ĐỔI BOOKING`. Khi đang chọn một đợt, file chỉ gồm đợt đó. Booking mới nhất được chuyển sang mục **File đã làm**.
 
 Nhập bằng link: khi chạy `npm run dev`, máy chủ tải file từ link (SharePoint/OneDrive tự thêm `download=1`, Google Sheets tự xuất `.xlsx`). Link SharePoint nội bộ cần đăng nhập nên không tải được: đặt quyền chia sẻ “Bất kỳ ai có link” hoặc tải file về rồi chọn file. Bản Sites chỉ đọc được link cho phép tải chéo (CORS).
 

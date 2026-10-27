@@ -19,7 +19,8 @@ function signed(value) {
 
 function rowIdentity(row) {
   return `<th><strong>${escapeHtml(row.po || '—')}</strong><small>${escapeHtml(row.customer || '')}</small></th>
-    <td class="th-left"><strong>${escapeHtml(row.ref || '—')}</strong><small>${escapeHtml(row.color || '')}</small></td>`;
+    <td class="th-left"><strong>${escapeHtml(row.ref || '—')}</strong></td>
+    <td class="color-cell" title="${escapeHtml(row.color || '')}">${escapeHtml(row.color || '—')}</td>`;
 }
 
 function changeDetail(change) {
@@ -33,7 +34,7 @@ function section(title, tone, rows, renderRow, headers) {
   if (!rows.length) return '';
   return `<section class="change-section change-section--${tone}">
     <h3>${title} <span>${formatNumber.format(rows.length)}</span></h3>
-    <div class="table-wrap"><table class="delivery-table change-table"><thead><tr>${headers.map((header, index) => `<th${index === 1 ? ' class="th-left"' : ''}>${header}</th>`).join('')}</tr></thead><tbody>${rows.map(renderRow).join('')}</tbody></table></div>
+    <div class="table-wrap"><table class="delivery-table change-table"><thead><tr>${headers.map((header, index) => `<th${index === 1 || index === 2 ? ' class="th-left"' : ''}>${header}</th>`).join('')}</tr></thead><tbody>${rows.map(renderRow).join('')}</tbody></table></div>
   </section>`;
 }
 
@@ -60,8 +61,8 @@ export function renderChangeReport(change) {
     <div><span>Tổng booking thay đổi</span><strong class="${report.quantityDelta < 0 ? 'delta-down' : 'delta-up'}">${signed(report.quantityDelta)}</strong><small>sản phẩm</small></div>
   </div>`;
   const source = `<p class="change-source">So sánh <strong>${escapeHtml(change.filename)}</strong> với bản nhập trước <strong>${escapeHtml(change.previousFilename || '')}</strong>.${report.truncated ? ' Mỗi nhóm chỉ hiện 500 dòng đầu.' : ''}</p>`;
-  const changed = section('Dòng bị sửa', 'changed', report.changed, ({ row, changes }) => `<tr>${rowIdentity(row)}<td>${escapeHtml(row.leadTime || '—')}</td><td class="th-left"><ul class="change-fields">${changes.map(changeDetail).join('')}</ul></td></tr>`, ['PO', 'Mã hàng · Màu', 'Leadtime', 'Thay đổi']);
-  const added = section('Dòng thêm mới', 'added', report.added, (row) => `<tr>${rowIdentity(row)}<td>${escapeHtml(row.leadTime || '—')}</td><td>${formatValue('lineQuantity', row.lineQuantity)}</td><td>${formatValue('outputDate', row.outputDate)}</td></tr>`, ['PO', 'Mã hàng · Màu', 'Leadtime', 'Số lượng', 'Hạn giao']);
-  const removed = section('Dòng bị xóa', 'removed', report.removed, (row) => `<tr>${rowIdentity(row)}<td>${escapeHtml(row.leadTime || '—')}</td><td>${formatValue('lineQuantity', row.lineQuantity)}</td><td>${formatValue('outputDate', row.outputDate)}</td></tr>`, ['PO', 'Mã hàng · Màu', 'Leadtime', 'Số lượng', 'Hạn giao']);
+  const changed = section('Dòng bị sửa', 'changed', report.changed, ({ row, changes }) => `<tr>${rowIdentity(row)}<td>${escapeHtml(row.leadTime || '—')}</td><td class="th-left"><ul class="change-fields">${changes.map(changeDetail).join('')}</ul></td></tr>`, ['PO', 'Mã hàng', 'Màu', 'Leadtime', 'Thay đổi']);
+  const added = section('Dòng thêm mới', 'added', report.added, (row) => `<tr>${rowIdentity(row)}<td>${escapeHtml(row.leadTime || '—')}</td><td>${formatValue('lineQuantity', row.lineQuantity)}</td><td>${formatValue('outputDate', row.outputDate)}</td></tr>`, ['PO', 'Mã hàng', 'Màu', 'Leadtime', 'Số lượng', 'Hạn giao']);
+  const removed = section('Dòng bị xóa', 'removed', report.removed, (row) => `<tr>${rowIdentity(row)}<td>${escapeHtml(row.leadTime || '—')}</td><td>${formatValue('lineQuantity', row.lineQuantity)}</td><td>${formatValue('outputDate', row.outputDate)}</td></tr>`, ['PO', 'Mã hàng', 'Màu', 'Leadtime', 'Số lượng', 'Hạn giao']);
   return `${source}${summary}${changed}${added}${removed}`;
 }

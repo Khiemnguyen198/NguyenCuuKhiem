@@ -60,7 +60,7 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel }) {
             <select id="customerFilter" aria-label="Lọc theo khách hàng"><option value="">Tất cả khách hàng</option></select>
             <div class="status-filters" id="statusFilters" role="group" aria-label="Lọc theo trạng thái">${STATUS_FILTERS.map(([value, label]) => `<button type="button" data-status="${value}"${value === 'open' ? ' aria-pressed="true"' : ''}>${label}<span data-status-count="${value}"></span></button>`).join('')}</div>
           </div>
-          <div class="table-wrap"><table class="delivery-table model-table"><thead><tr><th>Khách hàng</th><th class="th-left">Mã hàng · Màu</th><th>SL hợp đồng</th><th>Đã nhận</th><th>Đã in (giao)</th><th>Giao đạt</th><th>Lỗi</th><th>Còn thiếu</th><th>Hoàn thành</th><th>Hạn giao</th><th>Trạng thái</th></tr></thead><tbody id="modelBody"></tbody></table></div>
+          <div class="table-wrap"><table class="delivery-table model-table"><thead><tr><th>Khách hàng</th><th class="th-left">Mã hàng</th><th class="th-left">Màu</th><th>SL hợp đồng</th><th>Đã nhận</th><th>Đã in (giao)</th><th>Giao đạt</th><th>Lỗi</th><th>Còn thiếu</th><th>Hoàn thành</th><th>Hạn giao</th><th>Trạng thái</th></tr></thead><tbody id="modelBody"></tbody></table></div>
           <div class="model-table__foot"><span id="modelCount"></span><button class="secondary-button" id="showMoreModels" hidden>Xem thêm</button></div>
         </section>
       </section>

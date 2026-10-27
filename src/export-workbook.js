@@ -33,62 +33,99 @@ export function exportFilename(now = new Date(), batch = null) {
   return `TONG_HOP_GIAO_HANG${week}_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`;
 }
 
-const BOOKING_COLUMNS = [
-  ['LINE', (row) => row.line, 7], ['CUS', (row) => row.customer, 14], ['BRAND', (row) => row.brand, 14],
-  ['REF', (row) => row.ref, 10], ['COLOR', (row) => row.color, 32], ['PO', (row) => row.po, 14], ['SS', (row) => row.season, 7],
-  ['LINE QTY', (row) => row.bookedLineQuantity ?? row.lineQuantity, 9], ['INPUT', (row) => viDate(row.inputDate), 11],
-  ['OUTPUT', (row) => viDate(row.outputDate), 11], ['MODEL CODE', (row) => row.modelCode, 11], ['SỐ PHIẾU', (row) => row.ticketNumber, 9],
-  ['SLHĐ TỔNG', (row) => row.contractQuantity ?? '', 10], ['KẾ HOẠCH', (row) => row.planner, 10], ['HÌNH IN', (row) => row.printCount, 8],
-  ['Leadtime', (row) => row.leadTime, 9]
-];
-const PROGRESS_COLUMNS = [
-  ['SL trong đợt', (row) => row.lineQuantity, 10],
-  ['Đã nhận BTP (mã)', (row, item) => item?.received ?? '', 12], ['Giao đạt (mã)', (row, item) => item?.good ?? '', 11],
-  ['Còn thiếu (mã)', (row, item) => item?.remaining ?? '', 11], ['Trạng thái mã', (row, item) => (item ? STATUS_COPY[item.status].label : 'Chưa nhận BTP'), 13],
-  ['Hạn còn (ngày)', (row, item) => item?.daysToDue ?? '', 10]
-];
-const LABELS = ['PXC CHUYỂN', 'PXI TRẢ', 'TỔNG TUẦN', 'TỔNG NGÀY'];
+const EXCEL_EPOCH = Date.UTC(1899, 11, 30);
+const serial = (iso) => (/^\d{4}-\d{2}-\d{2}$/.test(String(iso || '')) ? (Date.parse(`${iso}T00:00:00Z`) - EXCEL_EPOCH) / 86_400_000 : null);
+const dateCell = (iso, format) => {
+  const value = serial(iso);
+  return value == null ? null : { t: 'n', v: value, z: format };
+};
+const numberCell = (value, format = '#,##0') => (typeof value === 'number' && Number.isFinite(value) ? { t: 'n', v: value, z: format } : value ?? null);
 
-// Same layout as the customer's TH sheet: booking columns, then the daily plan with
-// PXC / PXI / TỔNG TUẦN / TỔNG NGÀY rows above the data. Progress columns sit before the plan.
-function bookingSheet({ booking, summary }) {
+// Columns A–P of the customer's TH sheet, in the same order and spelling.
+const TH_COLUMNS = [
+  ['LINE', (row) => row.line, 6], ['CUS', (row) => row.customer, 13], ['BRAND', (row) => row.brand, 14],
+  ['REF', (row) => row.ref, 9], ['COLOR', (row) => row.color, 30], ['PO', (row) => row.po, 13], ['SS', (row) => row.season, 6],
+  ['LINE QTY', (row) => numberCell(row.bookedLineQuantity ?? row.lineQuantity), 9],
+  [' INPUT ', (row) => dateCell(row.inputDate, 'd-mmm'), 8], [' OUTPUT ', (row) => dateCell(row.outputDate, 'd-mmm'), 8],
+  [' MODEL CODE ', (row) => row.modelCode, 10], [' SỐ PHIẾU ', (row) => row.ticketNumber, 9],
+  [' SLHĐ TỔNG ', (row) => numberCell(row.contractQuantity ?? 0), 10], ['KẾ HOẠCH', (row) => row.planner, 9],
+  ['HÌNH IN', (row) => numberCell(row.printCount, '0'), 7], ['Leadtime', (row) => row.leadTime, 8]
+];
+// Appended after the daily plan so columns A onward stay exactly as in TH.
+const PROGRESS_COLUMNS = [
+  ['SL trong đợt', (row) => numberCell(row.lineQuantity), 10, true],
+  ['Đã nhận BTP (mã)', (row, item) => numberCell(item?.received ?? 0), 11],
+  ['Đã in (mã)', (row, item) => numberCell(item?.delivered ?? 0), 10],
+  ['Giao đạt (mã)', (row, item) => numberCell(item?.good ?? 0), 10],
+  ['Lỗi (mã)', (row, item) => numberCell(item?.defects ?? 0), 8],
+  ['Còn thiếu (mã)', (row, item) => numberCell(item?.remaining ?? row.lineQuantity), 10],
+  ['Trạng thái mã', (row, item) => (item ? STATUS_COPY[item.status].label : 'Chưa nhận BTP'), 13],
+  ['Hạn còn (ngày)', (row, item) => item?.daysToDue ?? '', 9]
+];
+
+const isSunday = (iso) => new Date(`${iso}T00:00:00Z`).getUTCDay() === 0;
+
+// The customer's TH layout: header on row 1 and again on row 5, PXI TRẢ / TỔNG TUẦN /
+// TỔNG NGÀY on rows 2–4 under the PXC CHUYỂN label, data from row 6. TỔNG TUẦN is the
+// Monday–Saturday sum, merged across those days.
+function thSheet({ booking, summary }) {
   const { rows = [], days = [] } = booking;
   const itemsByProduct = new Map();
   for (const item of summary.items) {
     if (!itemsByProduct.has(item.product) || item.contract > itemsByProduct.get(item.product).contract) itemsByProduct.set(item.product, item);
   }
-  const progress = booking.batch ? PROGRESS_COLUMNS : PROGRESS_COLUMNS.slice(1);
-  const fixed = [...BOOKING_COLUMNS, ...progress];
+  const progress = PROGRESS_COLUMNS.filter((column) => booking.batch || !column[3]);
+  const labelColumn = TH_COLUMNS.length;
+  const firstDay = labelColumn + 1;
+  const progressStart = firstDay + days.length;
   const load = dailyLoad(rows, days);
-  // TỔNG TUẦN sits on the first day of each Monday-based week, as in the original sheet.
-  const weekTotals = days.map(() => '');
-  let weekStart = -1;
-  let currentWeek = null;
+  const header = [...TH_COLUMNS.map(([title]) => title), ' PXC CHUYỂN ', ...days.map((day) => dateCell(day.date, 'dd/mm')), ...progress.map(([title]) => title)];
+  const table = [
+    header,
+    [...TH_COLUMNS.map(() => null), ' PXI TRẢ ', ...days.map((day) => dateCell(day.returnDate, 'dd/mm'))],
+    [...TH_COLUMNS.map(() => null), ' TỔNG TUẦN ', ...days.map(() => null)],
+    [...TH_COLUMNS.map(() => null), ' TỔNG NGÀY ', ...load.map((value) => numberCell(value))],
+    header
+  ];
+  const merges = [];
+  let week = null;
   days.forEach((day, index) => {
     const monday = new Date(`${day.date}T00:00:00Z`);
     monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
     const key = monday.toISOString().slice(0, 10);
-    if (key !== currentWeek) {
-      currentWeek = key;
-      weekStart = index;
-      weekTotals[index] = 0;
+    if (isSunday(day.date)) return;
+    if (!week || week.key !== key) {
+      week = { key, start: index, end: index, total: 0 };
+      merges.push(week);
     }
-    weekTotals[weekStart] += load[index];
+    week.end = index;
+    week.total += load[index];
   });
-  const blank = fixed.map(() => '');
-  const shortDay = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}` : '');
-  const sheetRows = [
-    [...fixed.map(([title]) => title), LABELS[0], ...days.map((day) => shortDay(day.date))],
-    [...blank, LABELS[1], ...days.map((day) => shortDay(day.returnDate))],
-    [...blank, LABELS[2], ...weekTotals.map((value) => (value === '' ? '' : Math.round(value)))],
-    [...blank, LABELS[3], ...load.map((value) => Math.round(value))]
-  ];
+  for (const span of merges) table[2][firstDay + span.start] = numberCell(span.total);
+  let previousLeadTime = null;
   for (const row of rows) {
+    // TH leaves one empty row between lead-time groups.
+    if (previousLeadTime != null && row.leadTime !== previousLeadTime) table.push([]);
+    previousLeadTime = row.leadTime;
     const item = itemsByProduct.get(productKey(row.ref, row.color));
-    sheetRows.push([...fixed.map(([, read]) => read(row, item)), '', ...days.map((day, index) => row.allocations?.[index] ?? '')]);
+    table.push([
+      ...TH_COLUMNS.map(([, read]) => read(row)),
+      null,
+      ...days.map((day, index) => {
+        const value = row.allocations?.[index];
+        return value == null ? null : numberCell(value, '#,##0');
+      }),
+      ...progress.map(([, read]) => read(row, item))
+    ]);
   }
-  if (!rows.length) sheetRows.push(['Chưa có dữ liệu booking chi tiết. Nhập lại file booking để có sheet này.']);
-  return sheetFrom(sheetRows, [...fixed.map(([, , width]) => width), 13, ...days.map(() => 7)]);
+  if (!rows.length) table.push(['Chưa có dữ liệu booking chi tiết. Nhập lại file booking để có sheet này.']);
+  const sheet = XLSX.utils.aoa_to_sheet(table);
+  sheet['!merges'] = merges
+    .filter((span) => span.end > span.start)
+    .map((span) => ({ s: { r: 2, c: firstDay + span.start }, e: { r: 2, c: firstDay + span.end } }));
+  sheet['!cols'] = [...TH_COLUMNS.map(([, , width]) => ({ wch: width })), { wch: 12 }, ...days.map(() => ({ wch: 7 })), ...progress.map(([, , width]) => ({ wch: width }))];
+  sheet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 4, c: 0 }, e: { r: table.length - 1, c: progressStart + progress.length - 1 } }) };
+  return sheet;
 }
 
 function overviewSheet({ summary, dashboard, sources, generatedAt }) {
@@ -208,8 +245,8 @@ function changeSheet(change) {
 
 export function buildExportWorkbook({ summary, dashboard, booking = dashboard, sources, aiReport = null, change = null, generatedAt = new Date() }) {
   const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, thSheet({ booking, summary }), 'TH');
   XLSX.utils.book_append_sheet(workbook, overviewSheet({ summary, dashboard, sources, generatedAt }), 'TỔNG QUAN');
-  XLSX.utils.book_append_sheet(workbook, bookingSheet({ booking, summary }), 'BOOKING');
   XLSX.utils.book_append_sheet(workbook, modelSheet(summary.items), 'THEO MÃ HÀNG');
   XLSX.utils.book_append_sheet(workbook, customerSheet(summary.items), 'THEO KHÁCH HÀNG');
   XLSX.utils.book_append_sheet(workbook, warningSheet(summary.items, aiReport), 'CẢNH BÁO');

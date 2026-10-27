@@ -113,18 +113,19 @@ function detailRow(item) {
     ['SL booking', item.bookedQuantity == null ? '—' : number(item.bookedQuantity)],
     ['Nguồn', [item.sources.booking && 'booking', item.sources.receipt && 'file nhận', item.sources.delivery && 'file giao'].filter(Boolean).join(' · ') || '—']
   ].map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join('');
-  return `<tr class="model-detail"><td colspan="11"><div class="model-detail__facts">${facts}</div>${prints}</td></tr>`;
+  return `<tr class="model-detail"><td colspan="12"><div class="model-detail__facts">${facts}</div>${prints}</td></tr>`;
 }
 
 export function renderModelRows(items, expandedKey, limit = PAGE_SIZE) {
-  if (!items.length) return '<tr><td colspan="11" class="delivery-table__empty">Không có mã hàng phù hợp bộ lọc.</td></tr>';
+  if (!items.length) return '<tr><td colspan="12" class="delivery-table__empty">Không có mã hàng phù hợp bộ lọc.</td></tr>';
   return items.slice(0, limit).map((item) => {
     const key = `${item.customer}|${item.model}|${item.color}`;
     const copy = STATUS_COPY[item.status];
     const expanded = key === expandedKey;
     return `<tr class="model-row${expanded ? ' model-row--expanded' : ''}" data-model-key="${escapeHtml(key)}" tabindex="0" aria-expanded="${expanded}">
       <td class="delivery-table__customers"><span class="customer-chip">${customerLogo(item.customer)}<span>${escapeHtml(item.customer)}</span></span></td>
-      <th class="model-cell"><strong>${escapeHtml(item.model)}</strong><small title="${escapeHtml(item.color)}">${escapeHtml(item.color || '—')}</small></th>
+      <th class="model-cell"><strong>${escapeHtml(item.model)}</strong>${item.season ? `<small>${escapeHtml(item.season)}</small>` : ''}</th>
+      <td class="color-cell" title="${escapeHtml(item.color)}">${escapeHtml(item.color || '—')}</td>
       <td>${number(item.contract)}</td>
       <td>${number(item.received)}</td>
       <td>${number(item.delivered)}</td>

@@ -41,7 +41,7 @@ Always pull `master` before editing. Do not treat the GPT Sites deployment as th
 - Theo mã hàng page: contract, received, printed, good, defects, remaining, due date and status per customer and product.
 - Booking re-imports are compared row by row with the previous import; changes wait for a reviewer's confirmation.
 - Booking batches: one planning week (PXC days, Monday–Sunday) can be selected; the overview, product list and export then cover only that week.
-- Export workbook: TỔNG QUAN, BOOKING (TH layout with daily plan), THEO MÃ HÀNG, THEO KHÁCH HÀNG, CẢNH BÁO, THAY ĐỔI BOOKING.
+- Export workbook: TH (same layout as the booking TH sheet, progress columns after the daily plan), TỔNG QUAN, THEO MÃ HÀNG, THEO KHÁCH HÀNG, CẢNH BÁO, THAY ĐỔI BOOKING.
 - Booking checks also flag Sunday due dates, missing SLHĐ TỔNG and TH vs lead-time sheet mismatches.
 
 ## Current limitations
