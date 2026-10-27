@@ -682,7 +682,16 @@ async function exportSummary() {
   // The export is the "processed" result of the newest booking file.
   const original = fileHistoryState.find((file) => file.category === 'original' && String(file.importId) === String(latestBooking.importId));
   const alreadyProcessed = fileHistoryState.some((file) => file.category === 'processed' && String(file.importId) === String(latestBooking.importId));
-  if (original && !alreadyProcessed) await markFile(String(original.id), 'processed', `Đã xuất file ${filename}`);
+  // The file is already downloaded; failing to record it in the history must not look like a failed export.
+  if (original && !alreadyProcessed) {
+    try {
+      await markFile(String(original.id), 'processed', `Đã xuất file ${filename}`);
+    } catch (error) {
+      const reason = isNetworkError(error.message) ? 'không kết nối được máy chủ' : error.message;
+      showToast(`Đã xuất ${filename}, nhưng chưa ghi được vào "File đã làm" (${reason}).`, 'info');
+      return;
+    }
+  }
   showToast(`Đã xuất ${filename}.`);
 }
 
@@ -768,12 +777,19 @@ function diffWithPreviousBrowserImport({ rows, days }, filename, importId) {
 }
 
 let toastTimer;
+// Browsers report a dropped connection as "Failed to fetch" (Chrome), "NetworkError…" (Firefox)
+// or "Load failed" (Safari).
+const isNetworkError = (message) => /failed to fetch|networkerror|load failed/i.test(String(message));
+const NETWORK_MESSAGE = 'Không kết nối được máy chủ. Kiểm tra lệnh npm run dev còn chạy không, rồi tải lại trang.';
+
 function showToast(message, type = 'success') {
   const toast = document.querySelector('#toast');
-  toast.textContent = message;
+  const text = isNetworkError(message) ? NETWORK_MESSAGE : message;
+  toast.textContent = text;
   toast.className = `toast toast--visible toast--${type}`;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { toast.className = 'toast'; }, 3200);
+  // Longer messages stay up long enough to read.
+  toastTimer = setTimeout(() => { toast.className = 'toast'; }, text.length > 80 ? 6000 : 3200);
 }
 
 function browserDashboard(file) {
