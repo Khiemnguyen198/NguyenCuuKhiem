@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import './styles.css';
 import { analyzeBookingRows } from './local-ai.js';
 import { MACHINE_SUGGESTIONS, normalizeStandardRows } from './config-ai.js';
+import { calculateCapacity } from './capacity.js';
 
 const formatNumber = new Intl.NumberFormat('vi-VN');
 const isStaticPages = import.meta.env.PROD || import.meta.env.BASE_URL !== '/';
@@ -14,7 +15,13 @@ const fallbackDashboard = {
   rowCount: 2503,
   totalQuantity: 1768485,
   totalImpressions: 2953041,
-  uniquePo: 2410
+  uniquePo: 2410,
+  leadTimes: [
+    { leadTime: '1 ngày', rowCount: 2149, totalQuantity: 1633779, totalImpressions: 2355842 },
+    { leadTime: '2 ngày', rowCount: 184, totalQuantity: 72658, totalImpressions: 272254 },
+    { leadTime: '3 ngày', rowCount: 143, totalQuantity: 56000, totalImpressions: 282609 },
+    { leadTime: '5 ngày', rowCount: 27, totalQuantity: 6048, totalImpressions: 42336 }
+  ]
 };
 
 const defaultSettings = {
@@ -44,64 +51,13 @@ let fileHistoryState = [{
   note: 'File gốc được giữ nguyên; hệ thống chỉ đọc dữ liệu.'
 }];
 
-const schedule = [
-  {
-    label: '1 ngày', due: '28/10',
-    days: [
-      { load: 520418, minutes: 173473, capacity: 144000, machines: 22, rate: 120 },
-      { load: 312617, minutes: 104206, capacity: 144000, machines: 13, rate: 72 },
-      { load: 198306, minutes: 66102, capacity: 144000, machines: 9, rate: 46 },
-      null, null, null
-    ]
-  },
-  {
-    label: '2 ngày', due: '29/10',
-    days: [
-      { load: 286720, minutes: 95573, capacity: 144000, machines: 12, rate: 66 },
-      { load: 402118, minutes: 134039, capacity: 144000, machines: 17, rate: 93 },
-      { load: 365422, minutes: 121807, capacity: 144000, machines: 16, rate: 85 },
-      { load: 201744, minutes: 67248, capacity: 144000, machines: 9, rate: 47 },
-      null, null
-    ]
-  },
-  {
-    label: '3 ngày', due: '30/10',
-    days: [
-      { load: 218305, minutes: 72768, capacity: 144000, machines: 10, rate: 51 },
-      { load: 267440, minutes: 89147, capacity: 144000, machines: 12, rate: 62 },
-      { load: 309815, minutes: 103272, capacity: 144000, machines: 14, rate: 72 },
-      { load: 288671, minutes: 96224, capacity: 144000, machines: 13, rate: 67 },
-      { load: 176120, minutes: 58707, capacity: 144000, machines: 8, rate: 41 },
-      null
-    ]
-  },
-  {
-    label: '5 ngày', due: '31/10',
-    days: [
-      { load: 102665, minutes: 34222, capacity: 144000, machines: 5, rate: 24 },
-      { load: 141232, minutes: 47077, capacity: 144000, machines: 6, rate: 33 },
-      { load: 188506, minutes: 62835, capacity: 144000, machines: 8, rate: 44 },
-      { load: 212884, minutes: 70961, capacity: 144000, machines: 9, rate: 49 },
-      { load: 233418, minutes: 77806, capacity: 144000, machines: 10, rate: 54 },
-      { load: 321560, minutes: 107187, capacity: 144000, machines: 14, rate: 74 }
-    ]
-  }
-];
-
-const weekdays = [
-  ['Thứ 2', '26/10'], ['Thứ 3', '27/10'], ['Thứ 4', '28/10'],
-  ['Thứ 5', '29/10'], ['Thứ 6', '30/10'], ['Thứ 7', '31/10']
-];
-
 document.querySelector('#app').innerHTML = `
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand">Bàn điều phối<br />sản xuất</div>
       <nav class="nav" aria-label="Điều hướng chính">
-        <button class="nav__item" data-page="Tổng quan"><i class="ph ph-house"></i><span>Tổng quan</span></button>
-        <button class="nav__item nav__item--active" data-page="Kế hoạch"><i class="ph ph-calendar-dots"></i><span>Kế hoạch</span></button>
-        <button class="nav__item" data-page="Cân đối"><i class="ph ph-chart-bar"></i><span>Cân đối</span></button>
-        <button class="nav__item" data-page="Lịch sử"><i class="ph ph-clock-counter-clockwise"></i><span>Lịch sử</span></button>
+        <button class="nav__item nav__item--active" data-page="Tổng quan"><i class="ph ph-house"></i><span>Tổng quan</span></button>
+        <button class="nav__item" data-page="Kế hoạch"><i class="ph ph-calendar-dots"></i><span>Kế hoạch</span></button>
         <button class="nav__item" data-page="Cấu hình"><i class="ph ph-gear-six"></i><span>Cấu hình</span></button>
       </nav>
       <div class="sidebar__foot"><span class="status-dot"></span>${isStaticPages ? 'Lưu trên trình duyệt' : 'SQLite đang hoạt động'}</div>
@@ -111,8 +67,8 @@ document.querySelector('#app').innerHTML = `
       <header class="topbar">
         <div class="title-group">
           <div>
-            <p class="eyebrow" id="pageEyebrow">DANH SÁCH KẾ HOẠCH</p>
-            <h1 id="pageTitle">Kế hoạch</h1>
+            <p class="eyebrow" id="pageEyebrow">KHẢ NĂNG GIAO HÀNG</p>
+            <h1 id="pageTitle">Tổng quan</h1>
           </div>
           <button class="primary-button" id="importButton"><i class="ph ph-upload-simple"></i>Nhập file booking</button>
           <button class="back-button" id="backToPlans" hidden><i class="ph ph-arrow-left"></i>Danh sách kế hoạch</button>
@@ -123,7 +79,7 @@ document.querySelector('#app').innerHTML = `
         </div>
       </header>
 
-      <section class="plan-list-view" id="planListView">
+      <section class="plan-list-view" id="planListView" hidden>
         <div class="plan-list-heading">
           <div><p class="section-heading__overline">DỮ LIỆU ĐÃ NHẬP</p><h2>Các file kế hoạch</h2><p>Chọn một file để mở bảng điều phối và xem năng lực sản xuất.</p></div>
           <div class="plan-list-total"><strong id="planCount">0</strong><span>kế hoạch</span></div>
@@ -131,9 +87,25 @@ document.querySelector('#app').innerHTML = `
         <div class="plan-list" id="planFiles"></div>
       </section>
 
-      <section class="overview-view" id="overviewView" hidden>
+      <section class="overview-view" id="overviewView">
+        <section class="delivery-summary">
+          <div class="delivery-summary__heading">
+            <div><p class="section-heading__overline">KẾT QUẢ TỔNG HỢP</p><h2>Booking và khả năng đáp ứng</h2><p>Đối chiếu nhu cầu khách hàng với năng lực máy đã cấu hình.</p></div>
+            <div class="assurance-badge assurance-badge--pending" id="overviewAssurance"><i class="ph ph-info"></i><span><small>Kết luận</small><strong>Chưa đủ cấu hình</strong></span></div>
+          </div>
+          <div class="delivery-kpis">
+            <div><span>Booking yêu cầu</span><strong id="overviewBooking">—</strong><small>sản phẩm</small></div>
+            <div><span>Lượt hình cần in</span><strong id="overviewImpressions">—</strong><small>lượt hình</small></div>
+            <div><span>Có thể in</span><strong id="overviewPrintable">—</strong><small>sản phẩm ước tính</small></div>
+            <div><span>Có thể giao đúng hạn</span><strong id="overviewDeliverable">—</strong><small id="overviewShortage">Cần cấu hình định mức</small></div>
+          </div>
+          <div class="leadtime-summary">
+            <div class="leadtime-summary__head"><strong>Theo leadtime booking</strong><span>Nhà máy làm Thứ 2–Thứ 7, bỏ qua Chủ Nhật</span></div>
+            <div class="table-wrap"><table class="delivery-table"><thead><tr><th>Leadtime</th><th>Dòng hàng</th><th>Booking</th><th>Có thể giao</th><th>Thiếu</th><th>Kết luận</th></tr></thead><tbody id="overviewLeadtimeBody"></tbody></table></div>
+          </div>
+        </section>
         <div class="overview-intro">
-          <div><p class="section-heading__overline">KHO TỆP SẢN XUẤT</p><h2>Lịch sử xử lý file</h2><p>Theo dõi file từ lúc nhận bản gốc đến khi hoàn thành và giao đi.</p></div>
+          <div><p class="section-heading__overline">LUỒNG XỬ LÝ FILE</p><h2>Nhập → kiểm tra → xử lý → giao file</h2><p>File gốc luôn được giữ nguyên để đối chiếu.</p></div>
           <div class="overview-counts">
             <div><strong id="deliveredCount">0</strong><span>Đã giao</span></div>
             <div><strong id="processedCount">0</strong><span>Đã xử lý</span></div>
@@ -211,24 +183,25 @@ document.querySelector('#app').innerHTML = `
           </section>
 
           <section class="metrics" aria-label="Tổng quan dữ liệu">
-            <div class="metric"><strong id="rowCount">—</strong><span>dòng booking</span></div>
-            <div class="metric"><strong id="totalQuantity">—</strong><span>sản phẩm</span></div>
-            <div class="metric"><strong id="totalImpressions">—</strong><span>lượt hình</span></div>
-            <button class="metric metric--pending" id="settingsShortcut"><strong id="machinesRequired">—</strong><span id="machineMetricLabel">Máy cần <i class="ph ph-info"></i></span><small id="machineMetricMeta">Chờ cấu hình định mức thời gian</small></button>
+            <div class="metric"><strong id="totalQuantity">—</strong><span>Booking yêu cầu</span><small id="rowCount">— dòng booking</small></div>
+            <div class="metric"><strong id="totalImpressions">—</strong><span>Lượt hình cần in</span><small>Từ file booking</small></div>
+            <div class="metric"><strong id="printableQuantity">—</strong><span>Có thể in</span><small>Sản phẩm ước tính</small></div>
+            <div class="metric"><strong id="deliverableQuantity">—</strong><span>Có thể giao đúng hạn</span><small id="planShortage">Chờ cấu hình định mức</small></div>
           </section>
 
           <section class="capacity-panel">
-          <div class="section-heading">
-            <div><p class="section-heading__overline">KẾ HOẠCH TUẦN</p><h2>Năng lực sản xuất theo tuần</h2></div>
-            <div class="legend"><span><i class="legend__dot legend__dot--ok"></i>≤ 85% Bình thường</span><span><i class="legend__dot legend__dot--warn"></i>&gt; 85% Quá tải</span><span><i class="legend__dot legend__dot--danger"></i>&gt; 100% Vượt tải</span></div>
-          </div>
-          <div class="table-wrap">
-            <table class="capacity-table">
-              <thead><tr><th>Hạn giao</th><th>Chỉ tiêu</th>${weekdays.map(([day, date]) => `<th>${day}<span>${date}</span></th>`).join('')}</tr></thead>
-              <tbody id="scheduleBody"></tbody>
-            </table>
-          </div>
-          <div class="simulation-note"><i class="ph ph-info"></i><span>Số phút và máy trong bảng đang là dữ liệu mô phỏng giao diện. Hệ thống chỉ tính thật sau khi có định mức.</span></div>
+            <div class="section-heading">
+              <div><p class="section-heading__overline">ĐỐI CHIẾU KẾ HOẠCH</p><h2>Khả năng đáp ứng theo leadtime</h2></div>
+              <button class="capacity-config-link" id="settingsShortcut"><i class="ph ph-sliders-horizontal"></i><span><strong id="machinesRequired">Cấu hình năng lực</strong><small id="machineMetricMeta">Nhập phút và số máy</small></span></button>
+            </div>
+            <div class="capacity-facts">
+              <div><span>Tổng phút cần</span><strong id="requiredMinutes">—</strong></div>
+              <div><span>Tổng phút có thể chạy</span><strong id="availableMinutes">—</strong></div>
+              <div><span>Mức đáp ứng</span><strong id="coverageRate">—</strong></div>
+              <div class="plan-assurance" id="planAssurance"><span>Kết luận</span><strong>Chưa đủ cấu hình</strong></div>
+            </div>
+            <div class="table-wrap"><table class="delivery-table"><thead><tr><th>Leadtime</th><th>Dòng hàng</th><th>Booking</th><th>Có thể giao</th><th>Thiếu</th><th>Kết luận</th></tr></thead><tbody id="planLeadtimeBody"></tbody></table></div>
+            <div class="calculation-note"><i class="ph ph-info"></i><span>Kết quả là ước tính từ định mức đang chọn. Cần xác nhận số phút, số máy, ca làm và hiệu suất với sản xuất trước khi chốt kế hoạch.</span></div>
           </section>
         </div>
 
@@ -268,36 +241,6 @@ document.querySelector('#app').innerHTML = `
   </div>
   <div class="toast" id="toast" role="status"></div>
 `;
-
-function rateClass(rate) {
-  if (rate > 100) return 'danger';
-  if (rate > 85) return 'warn';
-  return 'ok';
-}
-
-function renderSchedule() {
-  document.querySelector('#scheduleBody').innerHTML = schedule.map((group) => {
-    const metrics = [
-      ['Tải in', 'lượt hình', 'load'],
-      ['Phút cần', 'phút', 'minutes'],
-      ['Công suất', 'phút', 'capacity'],
-      ['Máy cần', 'máy', 'machines'],
-      ['Trạng thái', '', 'rate']
-    ];
-    return metrics.map(([label, unit, key], metricIndex) => `
-      <tr class="${metricIndex === metrics.length - 1 ? 'status-row' : ''}">
-        ${metricIndex === 0 ? `<th rowspan="5" class="leadtime"><strong>${group.label}</strong><span>(${group.due})</span></th>` : ''}
-        <th class="indicator">${label}${unit ? `<span>(${unit})</span>` : ''}</th>
-        ${group.days.map((day) => {
-          if (!day) return '<td class="empty">—</td>';
-          if (key !== 'rate') return `<td>${formatNumber.format(day[key])}</td>`;
-          const state = rateClass(day.rate);
-          return `<td><strong class="rate rate--${state}">${day.rate}%</strong><span class="bar"><i class="bar__fill bar__fill--${state}" style="width:${Math.min(day.rate, 100)}%"></i></span></td>`;
-        }).join('')}
-      </tr>
-    `).join('');
-  }).join('');
-}
 
 function toIsoDate(value) {
   if (!value) return null;
@@ -341,14 +284,29 @@ function extractBookingRows(workbook) {
     : []);
 }
 
+function summarizeLeadTimes(rows) {
+  const groups = new Map();
+  rows.forEach((row) => {
+    const leadTime = String(row.leadTime || 'Chưa xác định').trim() || 'Chưa xác định';
+    const group = groups.get(leadTime) || { leadTime, rowCount: 0, totalQuantity: 0, totalImpressions: 0 };
+    group.rowCount += 1;
+    group.totalQuantity += Number(row.lineQuantity || 0);
+    group.totalImpressions += Number(row.lineQuantity || 0) * Number(row.printCount || 0);
+    groups.set(leadTime, group);
+  });
+  return [...groups.values()].sort((a, b) => Number.parseInt(a.leadTime, 10) - Number.parseInt(b.leadTime, 10));
+}
+
 function renderDashboard(data) {
   dashboardState = { ...fallbackDashboard, ...data };
   document.querySelector('#filename').textContent = data.filename;
   const sourceLabel = data.source === 'sqlite' ? 'Đã lưu SQLite' : data.source === 'browser' ? 'Đã đọc trong trình duyệt' : 'Dữ liệu mẫu';
   document.querySelector('#fileMeta').textContent = `${sourceLabel} • ${formatNumber.format(data.rowCount)} dòng`;
-  document.querySelector('#rowCount').textContent = formatNumber.format(data.rowCount);
+  document.querySelector('#rowCount').textContent = `${formatNumber.format(data.rowCount)} dòng booking`;
   document.querySelector('#totalQuantity').textContent = formatNumber.format(data.totalQuantity);
   document.querySelector('#totalImpressions').textContent = formatNumber.format(data.totalImpressions);
+  document.querySelector('#overviewBooking').textContent = formatNumber.format(data.totalQuantity);
+  document.querySelector('#overviewImpressions').textContent = formatNumber.format(data.totalImpressions);
   renderMachineCalculation();
 }
 
@@ -610,7 +568,7 @@ function showPage(pageName) {
   document.querySelector('#planningView').hidden = true;
   document.querySelector('#backToPlans').hidden = true;
   document.querySelector('#importButton').hidden = isConfig;
-  document.querySelector('#pageEyebrow').textContent = isOverview ? 'QUẢN LÝ FILE' : isConfig ? 'THÔNG SỐ & ĐỊNH MỨC' : 'DANH SÁCH KẾ HOẠCH';
+  document.querySelector('#pageEyebrow').textContent = isOverview ? 'KHẢ NĂNG GIAO HÀNG' : isConfig ? 'THÔNG SỐ & ĐỊNH MỨC' : 'DANH SÁCH KẾ HOẠCH';
   document.querySelector('#pageTitle').textContent = isOverview ? 'Tổng quan' : isConfig ? 'Cấu hình' : 'Kế hoạch';
   if (isOverview) loadFileHistory();
   if (isPlanList) loadFileHistory();
@@ -679,33 +637,72 @@ async function loadAiCheck(importId, force = false) {
   }
 }
 
-function calculateCapacity(data, settings) {
-  const minutesPerImpression = Number(settings.minutesPerImpression);
-  const machineCount = Number(settings.machineCount);
-  if (!minutesPerImpression || !machineCount) return null;
-  const requiredMinutes = data.totalImpressions * minutesPerImpression + data.uniquePo * Number(settings.setupMinutesPerPo || 0);
-  const capacityPerMachine = Number(settings.shiftsPerDay) * Number(settings.minutesPerShift) * (Number(settings.efficiencyPercent) / 100) * Number(settings.planningDays);
-  if (capacityPerMachine <= 0) return null;
-  const machinesRequired = Math.ceil(requiredMinutes / capacityPerMachine);
-  return { requiredMinutes, capacityPerMachine, machinesRequired, gap: machineCount - machinesRequired };
+function assuranceCopy(calculation) {
+  if (!calculation) return { label: 'Chưa đủ cấu hình', state: 'pending', icon: 'info' };
+  if (calculation.coverageRate >= 1) return { label: 'Đảm bảo theo năng lực', state: 'ok', icon: 'check-circle' };
+  if (calculation.coverageRate >= 0.9) return { label: 'Có nguy cơ trễ', state: 'warn', icon: 'warning' };
+  return { label: 'Chưa đảm bảo', state: 'danger', icon: 'warning-circle' };
+}
+
+function leadtimeRows(calculation) {
+  const groups = dashboardState.leadTimes || [];
+  if (!groups.length) return '<tr><td colspan="6" class="delivery-table__empty">File chưa có dữ liệu leadtime.</td></tr>';
+  return groups.map((group) => {
+    const quantity = Number(group.totalQuantity || 0);
+    const deliverable = calculation ? Math.floor(quantity * calculation.coverageRate) : null;
+    const shortage = deliverable == null ? null : Math.max(0, quantity - deliverable);
+    const copy = assuranceCopy(calculation);
+    return `<tr>
+      <th>${escapeHtml(group.leadTime)}</th>
+      <td>${formatNumber.format(group.rowCount || 0)}</td>
+      <td>${formatNumber.format(quantity)}</td>
+      <td>${deliverable == null ? '—' : formatNumber.format(deliverable)}</td>
+      <td>${shortage == null ? '—' : formatNumber.format(shortage)}</td>
+      <td><span class="result-pill result-pill--${copy.state}">${copy.label}</span></td>
+    </tr>`;
+  }).join('');
 }
 
 function renderMachineCalculation() {
   const calculation = calculateCapacity(dashboardState, settingsState);
-  const metric = document.querySelector('#settingsShortcut');
+  const copy = assuranceCopy(calculation);
+  const overviewAssurance = document.querySelector('#overviewAssurance');
+  overviewAssurance.className = `assurance-badge assurance-badge--${copy.state}`;
+  overviewAssurance.innerHTML = `<i class="ph ph-${copy.icon}"></i><span><small>Kết luận</small><strong>${copy.label}</strong></span>`;
+  document.querySelector('#overviewLeadtimeBody').innerHTML = leadtimeRows(calculation);
+  document.querySelector('#planLeadtimeBody').innerHTML = leadtimeRows(calculation);
   if (!calculation) {
-    document.querySelector('#machinesRequired').textContent = '—';
-    document.querySelector('#machineMetricLabel').innerHTML = 'Máy cần <i class="ph ph-info"></i>';
-    document.querySelector('#machineMetricMeta').textContent = 'Chờ cấu hình định mức thời gian';
-    metric.dataset.state = 'pending';
+    ['#printableQuantity', '#deliverableQuantity', '#overviewPrintable', '#overviewDeliverable', '#requiredMinutes', '#availableMinutes', '#coverageRate'].forEach((selector) => {
+      document.querySelector(selector).textContent = '—';
+    });
+    document.querySelector('#planShortage').textContent = 'Chờ cấu hình định mức';
+    document.querySelector('#overviewShortage').textContent = 'Cần cấu hình định mức';
+    document.querySelector('#machinesRequired').textContent = 'Cấu hình năng lực';
+    document.querySelector('#machineMetricMeta').textContent = 'Nhập phút và số máy';
+    const planAssurance = document.querySelector('#planAssurance');
+    planAssurance.className = 'plan-assurance plan-assurance--pending';
+    planAssurance.querySelector('strong').textContent = copy.label;
     return;
   }
-  document.querySelector('#machinesRequired').textContent = formatNumber.format(calculation.machinesRequired);
-  document.querySelector('#machineMetricLabel').textContent = `Máy cần / ${settingsState.planningDays} ngày`;
+  document.querySelector('#printableQuantity').textContent = formatNumber.format(calculation.printableQuantity);
+  document.querySelector('#deliverableQuantity').textContent = formatNumber.format(calculation.deliverableQuantity);
+  document.querySelector('#overviewPrintable').textContent = formatNumber.format(calculation.printableQuantity);
+  document.querySelector('#overviewDeliverable').textContent = formatNumber.format(calculation.deliverableQuantity);
+  const shortageText = calculation.shortageQuantity
+    ? `Thiếu ${formatNumber.format(calculation.shortageQuantity)} sản phẩm`
+    : 'Đủ theo booking';
+  document.querySelector('#planShortage').textContent = shortageText;
+  document.querySelector('#overviewShortage').textContent = shortageText;
+  document.querySelector('#requiredMinutes').textContent = formatNumber.format(Math.round(calculation.requiredMinutes));
+  document.querySelector('#availableMinutes').textContent = formatNumber.format(Math.round(calculation.availableMinutes));
+  document.querySelector('#coverageRate').textContent = `${formatNumber.format(Math.round(calculation.coverageRate * 100))}%`;
+  document.querySelector('#machinesRequired').textContent = `${formatNumber.format(calculation.machinesRequired)} máy cần`;
   document.querySelector('#machineMetricMeta').textContent = calculation.gap >= 0
-    ? `Đủ công suất • dư ${formatNumber.format(calculation.gap)} máy`
+    ? `Đang có ${formatNumber.format(settingsState.machineCount)} máy`
     : `Thiếu ${formatNumber.format(Math.abs(calculation.gap))} máy`;
-  metric.dataset.state = calculation.gap >= 0 ? 'ok' : 'danger';
+  const planAssurance = document.querySelector('#planAssurance');
+  planAssurance.className = `plan-assurance plan-assurance--${copy.state}`;
+  planAssurance.querySelector('strong').textContent = copy.label;
 }
 
 function fillSettingsForm(settings = settingsState) {
@@ -824,7 +821,8 @@ async function loadDashboard(importId = null) {
       rowCount: Number(selectedPlan.rowCount || 0),
       totalQuantity: Number(selectedPlan.totalQuantity || 0),
       totalImpressions: Number(selectedPlan.totalImpressions || 0),
-      uniquePo: Number(selectedPlan.uniquePo || 0)
+      uniquePo: Number(selectedPlan.uniquePo || 0),
+      leadTimes: selectedPlan.leadTimes || []
     } : fallbackDashboard);
     return;
   }
@@ -864,7 +862,8 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
       rowCount: rows.length,
       totalQuantity: rows.reduce((sum, row) => sum + row.lineQuantity, 0),
       totalImpressions: rows.reduce((sum, row) => sum + row.lineQuantity * row.printCount, 0),
-      uniquePo: new Set(rows.map((row) => row.po)).size
+      uniquePo: new Set(rows.map((row) => row.po)).size,
+      leadTimes: summarizeLeadTimes(rows)
     };
     if (isStaticPages) {
       const importId = crypto.randomUUID();
@@ -880,6 +879,7 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
         totalQuantity: localPayload.totalQuantity,
         totalImpressions: localPayload.totalImpressions,
         uniquePo: localPayload.uniquePo,
+        leadTimes: localPayload.leadTimes,
         aiReport,
         note: 'Chỉ lưu thông tin file; file Excel gốc không bị thay đổi.'
       }, ...fileHistoryState.filter((item) => item.id !== 'demo-original')];
@@ -1065,7 +1065,6 @@ document.querySelectorAll('.issue').forEach((issue) => issue.addEventListener('c
   issue.classList.add('issue--selected');
 }));
 
-renderSchedule();
 renderFileHistory();
 loadDashboard();
 loadSettings();

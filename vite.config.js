@@ -103,10 +103,10 @@ const demoDashboard = {
   totalImpressions: 2953041,
   uniquePo: 2410,
   leadTimes: [
-    { label: '1 ngày', rows: 2149, quantity: 1633779 },
-    { label: '2 ngày', rows: 184, quantity: 72658 },
-    { label: '3 ngày', rows: 143, quantity: 56000 },
-    { label: '5 ngày', rows: 27, quantity: 6048 }
+    { leadTime: '1 ngày', rowCount: 2149, totalQuantity: 1633779, totalImpressions: 2355842 },
+    { leadTime: '2 ngày', rowCount: 184, totalQuantity: 72658, totalImpressions: 272254 },
+    { leadTime: '3 ngày', rowCount: 143, totalQuantity: 56000, totalImpressions: 282609 },
+    { leadTime: '5 ngày', rowCount: 27, totalQuantity: 6048, totalImpressions: 42336 }
   ]
 };
 
@@ -134,7 +134,9 @@ function latestDashboard(importId = null) {
     : database.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
   if (!latest) return demoDashboard;
   const leadTimes = database.prepare(`
-    SELECT lead_time AS label, COUNT(*) AS rows, SUM(line_quantity) AS quantity
+    SELECT lead_time AS leadTime, COUNT(*) AS rowCount,
+           SUM(line_quantity) AS totalQuantity,
+           SUM(line_quantity * print_count) AS totalImpressions
     FROM booking_rows WHERE import_id = ? GROUP BY lead_time
     ORDER BY CASE lead_time WHEN '1 ngày' THEN 1 WHEN '2 ngày' THEN 2 WHEN '3 ngày' THEN 3 WHEN '5 ngày' THEN 5 ELSE 99 END
   `).all(latest.id);

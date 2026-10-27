@@ -1,6 +1,6 @@
 # Inkava Production Planner
 
-Website thử nghiệm để nhập file booking Excel, tổng hợp tải in theo lead time và lưu lịch sử vào SQLite.
+Website để nhập file booking Excel, tổng hợp nhu cầu theo leadtime, đối chiếu với năng lực nhà máy và lưu lịch sử vào SQLite.
 
 ## Chạy local
 
@@ -37,7 +37,7 @@ Mục **Tổng quan** phân loại lịch sử file thành:
 - File đã xử lý nhưng chưa giao.
 - File gốc chưa chỉnh sửa. Ứng dụng không ghi đè workbook tải lên; chỉ lưu dữ liệu đã đọc vào SQLite.
 
-Phần số phút và số máy hiện dùng dữ liệu mô phỏng giao diện. Kết quả thật chỉ được tính sau khi cấu hình định mức thời gian, số máy, số ca và hiệu suất.
+Mục **Tổng quan** trả lời trực tiếp bốn chỉ tiêu: booking yêu cầu, lượt hình cần in, số lượng có thể in và số lượng có thể giao đúng hạn. Nếu chưa có định mức, ứng dụng để trống kết quả năng lực thay vì tạo số mô phỏng.
 
 Mở mục **Cấu hình** hoặc nhấn vào chỉ số **Máy cần** để nhập định mức. Công thức:
 
@@ -45,7 +45,11 @@ Mở mục **Cấu hình** hoặc nhấn vào chỉ số **Máy cần** để nh
 Tổng phút = lượt hình × phút/lượt hình + số PO × phút setup/PO
 Công suất mỗi máy = ca/ngày × phút/ca × hiệu suất × số ngày kế hoạch
 Máy cần = làm tròn lên(Tổng phút / Công suất mỗi máy)
+Mức đáp ứng = min(100%, Tổng công suất / Tổng phút cần)
+Số lượng có thể giao = sản lượng booking × Mức đáp ứng
 ```
+
+Kết quả được chia theo leadtime 1/2/3/5 ngày. Lịch làm việc mặc định là Thứ Hai đến Thứ Bảy và bỏ qua Chủ Nhật. Đây là ước tính năng lực; cần xác nhận định mức thực tế với bộ phận sản xuất trước khi chốt kế hoạch.
 
 ### Danh mục cấu hình định mức
 
