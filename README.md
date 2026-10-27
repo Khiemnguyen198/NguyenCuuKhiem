@@ -19,6 +19,19 @@ Mở `http://localhost:4173` trong trình duyệt.
 4. Mở mục **Kế hoạch**, chọn đúng file trong danh sách để vào bảng điều phối của lần import đó.
 5. Khung **AI Local** tự kiểm tra dữ liệu trong SQLite và liệt kê các dòng cần xem lại.
 
+## Theo mã hàng (file kế toán kho)
+
+Mục **Theo mã hàng** đọc sheet `TỔNG HỢP` của file kế toán kho (`.xlsm`/`.xlsx`) và cho từng mã hàng + màu của mỗi khách:
+
+- SL hợp đồng (SLHĐ, mỗi PO chỉ tính một lần), đã nhận BTP, đã in (tổng giao), giao đạt, lỗi (hỏng in + lỗi vải), còn phải giao.
+- Mã có nhiều hình in (ORBIT/TRIBORD…) lấy số theo hình in có giao đạt thấp nhất; bấm vào dòng để xem từng hình in.
+- Hạn giao lấy từ file booking (khớp theo REF + COLOR), kèm số ngày còn lại hoặc số ngày trễ.
+- Trạng thái: Đã giao đủ, Đang in, Thiếu BTP, Chưa nhận BTP, Trễ hạn. Lọc theo khách hàng, trạng thái, tìm theo mã/màu.
+
+## Đối chiếu thay đổi booking
+
+Khách cập nhật thẳng vào file booking cũ, nên mỗi lần nhập lại, ứng dụng so sánh từng dòng (PO + REF + COLOR) với lần nhập trước và liệt kê dòng thêm mới, dòng bị xóa, dòng bị sửa (số lượng, INPUT, OUTPUT, leadtime, hình in, SLHĐ, số phiếu). Nút **Thay đổi booking** trên thanh trên báo số lần nhập chưa kiểm tra; người kiểm tra bấm **Đã kiểm tra** để ghi nhận.
+
 ## AI Local kiểm tra file
 
 Bộ kiểm tra chạy hoàn toàn trong ứng dụng, không gọi API và không gửi dữ liệu booking ra ngoài. Phiên bản nhẹ hiện tại phát hiện:

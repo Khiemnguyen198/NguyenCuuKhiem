@@ -1,3 +1,5 @@
+import * as XLSX from 'xlsx';
+
 const fieldAliases = {
   name: ['ten', 'tên', 'name', 'model', 'model code', 'ma', 'mã', 'loai', 'loại', 'quy cach', 'quy cách'],
   minutesPerImpression: ['so phut', 'số phút', 'phut', 'phút', 'minutes', 'minute', 'phut luot hinh', 'phút lượt hình', 'time'],
@@ -72,4 +74,17 @@ export function normalizeStandardRows(rows = []) {
     ignoredRows: Math.max(0, rows.length - standards.length),
     confidence: mapping.name && mapping.minutesPerImpression ? 'high' : standards.length ? 'medium' : 'low'
   };
+}
+
+// Header rows sit at different offsets in factory files, so try the first few.
+export function bestStandardSheet(workbook) {
+  let best = { standards: [], mapping: {}, ignoredRows: 0, confidence: 'low', sheetName: '' };
+  for (const sheetName of workbook.SheetNames) {
+    for (let range = 0; range < 8; range += 1) {
+      const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { range, defval: null, raw: true });
+      const candidate = { ...normalizeStandardRows(rows), sheetName };
+      if (candidate.standards.length > best.standards.length) best = candidate;
+    }
+  }
+  return best;
 }

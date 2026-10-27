@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculateCapacity } from './capacity.js';
+import { calculateCapacity } from '../src/capacity.js';
 
 const demand = { totalQuantity: 1000, totalImpressions: 2000, uniquePo: 10 };
 
