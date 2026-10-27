@@ -9,7 +9,11 @@ const BRANDS = [
   { name: 'Descente', domain: 'descente.com', pattern: /^DES?CENTE\b/i },
   { name: 'Coolmate', domain: 'coolmate.me', pattern: /^COOLMATE\b/i },
   { name: 'Sportmaster', domain: 'sportmaster.com', pattern: /^SPOR+T\s*MAST/i },
-  { name: 'Haddad', domain: 'haddad.com', pattern: /^HADDAD\b/i }
+  { name: 'Haddad', domain: 'haddad.com', pattern: /^HADDAD\b/i },
+  { name: 'Manmade', domain: 'manmadebrand.com', pattern: /^MANMADEN?\b/i },
+  { name: 'Ninunapz', domain: 'ninunapz.com', pattern: /^NINUNAPZ\b/i },
+  { name: 'Corèle V.', domain: 'corelev.com', pattern: /^COR[EÈ]LE\b/i },
+  { name: 'Pond', domain: 'pondcph.com', pattern: /^POND\b/i }
 ];
 
 export function brandOf(customer) {
