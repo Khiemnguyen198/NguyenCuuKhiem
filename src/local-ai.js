@@ -1,4 +1,4 @@
-export const LOCAL_AI_VERSION = 'booking-checker-1.1';
+export const LOCAL_AI_VERSION = 'booking-checker-1.3';
 
 const allowedLeadTimes = new Set(['1 ngày', '2 ngày', '3 ngày', '5 ngày']);
 
@@ -25,7 +25,10 @@ function rowLabel(row, index) {
   };
 }
 
-export function analyzeBookingRows(rows = []) {
+const isSunday = (isoDate) => /^\d{4}-\d{2}-\d{2}$/.test(String(isoDate)) && new Date(`${isoDate}T00:00:00Z`).getUTCDay() === 0;
+
+// sheetCheck comes from comparing TH with the lead-time sheets at import time (see booking-import.js).
+export function analyzeBookingRows(rows = [], { sheetCheck = null } = {}) {
   const findings = [
     { code: 'missing_po', severity: 'danger', title: 'Thiếu mã PO', description: 'Dòng booking không có mã PO.', matches: [] },
     { code: 'invalid_quantity', severity: 'danger', title: 'Số lượng không hợp lệ', description: 'LINE QTY bằng 0, âm hoặc không phải số.', matches: [] },
@@ -33,6 +36,10 @@ export function analyzeBookingRows(rows = []) {
     { code: 'invalid_lead_time', severity: 'warning', title: 'Lead time chưa chuẩn', description: 'Lead time không thuộc nhóm 1, 2, 3 hoặc 5 ngày.', matches: [] },
     { code: 'reversed_dates', severity: 'danger', title: 'Ngày giao trước ngày nhận', description: 'Ngày OUTPUT sớm hơn ngày INPUT.', matches: [] },
     { code: 'duplicate_rows', severity: 'warning', title: 'Dòng có khả năng bị trùng', description: 'Các trường chính của dòng booking giống hoàn toàn một dòng trước đó.', matches: [] },
+    { code: 'sunday_output', severity: 'warning', title: 'Hạn giao rơi vào Chủ Nhật', description: 'Nhà máy làm Thứ Hai–Thứ Bảy; OUTPUT Chủ Nhật thực tế phải giao từ Thứ Bảy.', matches: [] },
+    { code: 'missing_contract', severity: 'info', title: 'Thiếu SLHĐ tổng', description: 'Cột SLHĐ TỔNG trống hoặc bằng 0, thường do công thức trong sheet TH bỏ sót dòng.', matches: [] },
+    { code: 'sheet_mismatch', severity: 'warning', title: 'TH lệch sheet leadtime', description: 'Dòng trong TH không khớp số lượng hoặc không có trong sheet LEADTIME tương ứng (và ngược lại).', matches: [] },
+    { code: 'daily_total_mismatch', severity: 'warning', title: 'TỔNG NGÀY trong TH tính sai', description: 'Giá trị TỔNG NGÀY trong file khác Σ(HÌNH IN × phân bổ); thường do công thức SUMPRODUCT lệch dòng.', matches: [] },
     { code: 'quantity_outlier', severity: 'info', title: 'Sản lượng ngoại lệ', description: 'Sản lượng cao bất thường so với phân bố trong file.', matches: [] }
   ];
   const byCode = Object.fromEntries(findings.map((finding) => [finding.code, finding]));
@@ -61,7 +68,12 @@ export function analyzeBookingRows(rows = []) {
     if (seen.has(duplicateKey)) byCode.duplicate_rows.matches.push(label);
     else seen.add(duplicateKey);
     if (quantities.length >= 8 && quantity > outlierThreshold) byCode.quantity_outlier.matches.push(label);
+    if (isSunday(row.outputDate)) byCode.sunday_output.matches.push(label);
+    // Only workbooks that carry the column (TH) are checked; old imports have no value at all.
+    if ('contractQuantity' in row && !(Number(row.contractQuantity) > 0)) byCode.missing_contract.matches.push(label);
   });
+  (sheetCheck?.mismatches || []).forEach((mismatch) => byCode.sheet_mismatch.matches.push(mismatch));
+  (sheetCheck?.dailyTotals || []).forEach((mismatch) => byCode.daily_total_mismatch.matches.push(mismatch));
 
   const affectedRows = new Set(findings.flatMap((finding) => finding.matches.map((match) => match.row))).size;
   const activeFindings = findings

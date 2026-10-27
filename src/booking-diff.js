@@ -10,7 +10,7 @@ export const TRACKED_FIELDS = [
   ['ticketNumber', 'Số phiếu']
 ];
 
-const KEPT_FIELDS = ['line', 'customer', 'po', 'ref', 'color', 'modelCode', ...TRACKED_FIELDS.map(([field]) => field)];
+const KEPT_FIELDS = ['line', 'customer', 'brand', 'po', 'ref', 'color', 'season', 'modelCode', 'planner', 'allocations', ...TRACKED_FIELDS.map(([field]) => field)];
 const MAX_LISTED = 500;
 
 const normalize = (value) => String(value ?? '').replace(/\s+/g, ' ').trim().toLocaleUpperCase('vi-VN');
@@ -32,7 +32,22 @@ function keyRows(rows) {
   });
 }
 
-export function diffBookingRows(previousRows = [], currentRows = []) {
+// Allocations are stored by day position; compare them by date so new day columns don't
+// make every row look edited.
+function allocationText(row, days) {
+  if (!days?.length) return '';
+  const byDate = {};
+  for (const [index, value] of Object.entries(row.allocations || {})) {
+    const date = days[index]?.date;
+    if (!date) continue;
+    byDate[date] = typeof value === 'number' && typeof byDate[date] === 'number' ? byDate[date] + value : value;
+  }
+  return Object.keys(byDate).sort()
+    .map((date) => `${date.slice(8, 10)}/${date.slice(5, 7)}: ${typeof byDate[date] === 'number' ? Math.round(byDate[date]) : byDate[date]}`)
+    .join('; ');
+}
+
+export function diffBookingRows(previousRows = [], currentRows = [], { previousDays = null, currentDays = null } = {}) {
   const previous = new Map(keyRows(previousRows));
   const current = new Map(keyRows(currentRows));
   const added = [];
@@ -48,6 +63,12 @@ export function diffBookingRows(previousRows = [], currentRows = []) {
     const changes = TRACKED_FIELDS
       .filter(([field]) => comparable(before[field]) !== comparable(row[field]))
       .map(([field, label]) => ({ field, label, before: before[field] ?? null, after: row[field] ?? null }));
+    // Only compared when both imports carry their day plan.
+    if (previousDays?.length && currentDays?.length) {
+      const before = allocationText(previous.get(key), previousDays);
+      const after = allocationText(row, currentDays);
+      if (before !== after) changes.push({ field: 'allocations', label: 'Phân bổ ngày', before: before || null, after: after || null });
+    }
     if (changes.length) changed.push({ row, changes });
   }
   for (const [key, row] of previous) {

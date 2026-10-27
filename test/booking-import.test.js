@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as XLSX from 'xlsx';
-import { extractBookingRows, readWorkbook, summarizeBooking, toIsoDate } from '../src/booking-import.js';
+import { crossCheckSheets, extractBookingRows, readWorkbook, summarizeBooking, toIsoDate } from '../src/booking-import.js';
 
 test('converts Excel date serials without a timezone shift', () => {
   assert.equal(toIsoDate(46321), '2026-10-26');
@@ -53,4 +53,46 @@ test('reads padded headers and finds the header row in the TH sheet', () => {
   assert.equal(rows[0].contractQuantity, 1660);
   assert.equal(rows[0].inputDate, '2026-10-26');
   assert.equal(rows[0].leadTime, '2 ngày');
+});
+
+test('reports TH rows that disagree with the lead-time sheets', () => {
+  const header = ['LINE', 'CUS', 'PO', 'REF', 'COLOR', 'LINE QTY', 'HÌNH IN', 'Leadtime'];
+  const th = XLSX.utils.aoa_to_sheet([[], [], [], [], header,
+    [1, 'DEC', 'PO1', 'R1', 'C1', 100, 1, '1 ngày'],
+    [2, 'DEC', 'PO2', 'R1', 'C1', 50, 1, '1 ngày']
+  ]);
+  const leadTime = XLSX.utils.aoa_to_sheet([[], [], [], header.slice(0, 7),
+    [1, 'DEC', 'PO1', 'R1', 'C1', 120, 1],
+    [3, 'DEC', 'PO3', 'R1', 'C1', 10, 1]
+  ]);
+  const workbook = { SheetNames: ['TH', 'LEADTIME 1 NGÀY'], Sheets: { TH: th, 'LEADTIME 1 NGÀY': leadTime } };
+  const { checked, mismatches } = crossCheckSheets(readWorkbook(XLSX.write(workbook, { type: 'array', bookType: 'xlsx' })));
+
+  assert.equal(checked, true);
+  assert.deepEqual(mismatches.map((item) => [item.po, item.note]), [
+    ['PO1', 'TH 100 ≠ sheet leadtime 120'],
+    ['PO2', 'chỉ có trong TH (1 ngày)'],
+    ['PO3', 'thiếu trong TH (1 ngày)']
+  ]);
+});
+
+test('reads the daily plan and flags a wrong TỔNG NGÀY', async () => {
+  const { readBooking, crossCheckSheets: check } = await import('../src/booking-import.js');
+  const sheet = XLSX.utils.aoa_to_sheet([
+    [], [],
+    [null, null, null, null, null, null, null, null, 'PXI TRẢ', 46321, 46322],
+    [null, null, null, null, null, null, null, null, 'TỔNG NGÀY', 260, 999],
+    ['LINE', 'CUS', 'PO', 'REF', 'COLOR', 'LINE QTY', 'HÌNH IN', 'Leadtime', 'PXC CHUYỂN', 46320, 46321],
+    [1, 'DEC', 'PO1', 'R1', 'C1', 200, 2, '1 ngày', null, 100, 'X'],
+    [2, 'DEC', 'PO2', 'R1', 'C1', 60, 1, '1 ngày', null, 60, 40]
+  ]);
+  const workbook = readWorkbook(XLSX.write({ SheetNames: ['TH'], Sheets: { TH: sheet } }, { type: 'array', bookType: 'xlsx' }));
+  const { rows, days } = readBooking(workbook);
+  assert.deepEqual(days, [
+    { date: '2026-10-25', returnDate: '2026-10-26', fileTotal: 260 },
+    { date: '2026-10-26', returnDate: '2026-10-27', fileTotal: 999 }
+  ]);
+  assert.deepEqual(rows.map((row) => row.allocations), [{ 0: 100, 1: 'X' }, { 0: 60, 1: 40 }]);
+  const { dailyTotals } = check(workbook);
+  assert.deepEqual(dailyTotals.map((item) => item.note), ['TỔNG NGÀY trong file 999 ≠ tính lại 40 lượt hình']);
 });

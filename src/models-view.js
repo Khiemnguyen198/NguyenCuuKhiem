@@ -11,6 +11,7 @@ export const STATUS_FILTERS = [
   ['all', 'Tất cả'],
   ['open', 'Chưa giao đủ'],
   ['overdue', 'Trễ hạn'],
+  ['at-risk', 'Tới hạn chưa nhận'],
   ['printing', 'Đang in'],
   ['short-input', 'Thiếu BTP'],
   ['waiting', 'Chưa nhận BTP'],
@@ -32,19 +33,23 @@ export function matchesFilters(item, { customer, status, query }) {
   if (customer && item.customer !== customer) return false;
   if (status === 'open' && item.status === 'done') return false;
   if (status === 'overdue' && !item.overdue) return false;
-  if (!['all', 'open', 'overdue'].includes(status) && item.status !== status) return false;
+  if (status === 'at-risk' && !item.atRisk) return false;
+  if (!['all', 'open', 'overdue', 'at-risk'].includes(status) && item.status !== status) return false;
   if (!query) return true;
   const haystack = `${item.model} ${item.color} ${item.customer}`.toLocaleLowerCase('vi-VN');
   return haystack.includes(query.trim().toLocaleLowerCase('vi-VN'));
 }
 
-export function renderKpis(totals) {
+// In batch mode the received / delivered figures are cumulative per product (the warehouse
+// files cannot tell batches apart), so they are labelled as such instead of as a % of the batch.
+export function renderKpis(totals, { batch = false } = {}) {
   const defectRate = totals.delivered ? totals.defects / totals.delivered : 0;
+  const share = (value) => `${percent(totals.contract ? value / totals.contract : 0)} hợp đồng`;
   const cards = [
-    ['Số lượng hợp đồng', number(totals.contract), 'sản phẩm khách booking'],
-    ['Đã nhận BTP', number(totals.received), `${percent(totals.contract ? totals.received / totals.contract : 0)} hợp đồng`],
+    [batch ? 'Số lượng của đợt' : 'Số lượng hợp đồng', number(totals.contract), batch ? 'phân bổ trong đợt' : 'sản phẩm khách booking'],
+    ['Đã nhận BTP', number(totals.received), batch ? 'lũy kế theo mã (gồm đợt khác)' : share(totals.received)],
     ['Đã in (đã giao)', number(totals.delivered), `Tồn tại xưởng ${number(totals.onHand)}`],
-    ['Giao đạt', number(totals.good), `${percent(totals.contract ? totals.good / totals.contract : 0)} hợp đồng`],
+    ['Giao đạt', number(totals.good), batch ? 'lũy kế theo mã (gồm đợt khác)' : share(totals.good)],
     ['Lỗi', number(totals.defects), `${percent(defectRate)} · hỏng in ${number(totals.printDefects)} · lỗi vải ${number(totals.fabricDefects)}`],
     ['Còn phải giao', number(totals.remaining), `${number(totals.overdue)} mã trễ hạn`]
   ];
@@ -82,7 +87,7 @@ function progressBar(completion) {
 }
 
 function dueCell(item) {
-  if (!item.dueDate) return '<span class="muted">Chưa có booking</span>';
+  if (!item.dueDate) return '<span class="muted">Không có trong booking</span>';
   const [year, month, day] = item.dueDate.split('-');
   const date = `${day}/${month}/${year}`;
   if (item.status === 'done') return `${date}<small>Đã xong</small>`;
@@ -103,20 +108,24 @@ function detailRow(item) {
     ['Leadtime', escapeHtml(item.leadTime || '—')],
     ['Tồn tại xưởng (nhận − giao)', number(item.onHand)],
     ['Thiếu BTP (hợp đồng − nhận)', number(item.inputShortage)],
-    ['Mẫu / thiếu vải', `${number(item.samples)} / ${number(item.fabricShort)}`]
+    ['Mẫu / thiếu vải', `${number(item.samples)} / ${number(item.fabricShort)}`],
+    ['Nhận gần nhất', item.lastReceiptDate ? item.lastReceiptDate.split('-').reverse().join('/') : '—'],
+    ['SL booking', item.bookedQuantity == null ? '—' : number(item.bookedQuantity)],
+    ['Nguồn', [item.sources.booking && 'booking', item.sources.receipt && 'file nhận', item.sources.delivery && 'file giao'].filter(Boolean).join(' · ') || '—']
   ].map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join('');
-  return `<tr class="model-detail"><td colspan="11"><div class="model-detail__facts">${facts}</div>${prints}</td></tr>`;
+  return `<tr class="model-detail"><td colspan="12"><div class="model-detail__facts">${facts}</div>${prints}</td></tr>`;
 }
 
 export function renderModelRows(items, expandedKey, limit = PAGE_SIZE) {
-  if (!items.length) return '<tr><td colspan="11" class="delivery-table__empty">Không có mã hàng phù hợp bộ lọc.</td></tr>';
+  if (!items.length) return '<tr><td colspan="12" class="delivery-table__empty">Không có mã hàng phù hợp bộ lọc.</td></tr>';
   return items.slice(0, limit).map((item) => {
     const key = `${item.customer}|${item.model}|${item.color}`;
     const copy = STATUS_COPY[item.status];
     const expanded = key === expandedKey;
     return `<tr class="model-row${expanded ? ' model-row--expanded' : ''}" data-model-key="${escapeHtml(key)}" tabindex="0" aria-expanded="${expanded}">
       <td class="delivery-table__customers"><span class="customer-chip">${customerLogo(item.customer)}<span>${escapeHtml(item.customer)}</span></span></td>
-      <th class="model-cell"><strong>${escapeHtml(item.model)}</strong><small title="${escapeHtml(item.color)}">${escapeHtml(item.color || '—')}</small></th>
+      <th class="model-cell"><strong>${escapeHtml(item.model)}</strong>${item.season ? `<small>${escapeHtml(item.season)}</small>` : ''}</th>
+      <td class="color-cell" title="${escapeHtml(item.color)}">${escapeHtml(item.color || '—')}</td>
       <td>${number(item.contract)}</td>
       <td>${number(item.received)}</td>
       <td>${number(item.delivered)}</td>
@@ -125,7 +134,7 @@ export function renderModelRows(items, expandedKey, limit = PAGE_SIZE) {
       <td>${item.remaining ? `<strong>${number(item.remaining)}</strong>` : '0'}</td>
       <td class="progress-cell">${progressBar(item.completion)}</td>
       <td>${dueCell(item)}</td>
-      <td><span class="result-pill result-pill--${copy.state}">${copy.label}</span>${item.overdue ? '<span class="result-pill result-pill--danger">Trễ hạn</span>' : ''}</td>
+      <td><span class="result-pill result-pill--${copy.state}">${copy.label}</span>${item.overdue ? '<span class="result-pill result-pill--danger">Trễ hạn</span>' : ''}${item.atRisk ? '<span class="result-pill result-pill--warn">Sắp tới hạn</span>' : ''}</td>
     </tr>${expanded ? detailRow(item) : ''}`;
   }).join('');
 }

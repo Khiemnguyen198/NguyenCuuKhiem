@@ -37,9 +37,17 @@ Always pull `master` before editing. Do not treat the GPT Sites deployment as th
 - Manual standard entry provides the user-confirmed catalog of 19 factory machines/processes as quick-select suggestions while still allowing new names.
 - Production builds use browser storage for capacity settings and browser-only workbook import on static hosting, including GPT Sites at the root URL.
 
+- Three inputs on Tổng quan (file or link): booking, receiving log (sheet DATA) and warehouse summary (sheet TỔNG HỢP), joined per product (model + color).
+- Theo mã hàng page: contract, received, printed, good, defects, remaining, due date and status per customer and product.
+- Booking re-imports are compared row by row with the previous import; changes wait for a reviewer's confirmation.
+- Booking batches: one planning week (PXC days, Monday–Sunday) can be selected; the overview, product list and export then cover only that week.
+- Export workbook: TH (same layout as the booking TH sheet, progress columns after the daily plan), TỔNG QUAN, THEO MÃ HÀNG, THEO KHÁCH HÀNG, CẢNH BÁO, THAY ĐỔI BOOKING.
+- Booking checks also flag Sunday due dates, missing SLHĐ TỔNG and TH vs lead-time sheet mismatches.
+
 ## Current limitations
 
-- Minute and machine results remain unset until the user enters company standards.
+- Minute/machine capacity is no longer shown; delivery progress comes from the receiving and warehouse files.
+- Internal SharePoint links need a sign-in, so they cannot be imported by link; download the file instead.
 - Marking a file as processed/delivered records a user-confirmed status only; it does not edit, generate, or send a workbook.
 - Browser history is local to the current browser and does not store workbook bytes or sync across devices.
 - The GPT Sites URL must be republished or synchronized separately after repository changes.

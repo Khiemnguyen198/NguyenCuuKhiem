@@ -11,26 +11,31 @@ npm run dev -- --host 0.0.0.0 --port 4173 --strictPort
 
 Mở `http://localhost:4173` trong trình duyệt.
 
-## Luồng thử nghiệm
+## Luồng sử dụng
 
-1. Chọn **Nhập file booking**.
-2. Chọn workbook `.xlsx` có sheet `TH`, hoặc các sheet `LEADTIME 1/2/3/5 NGÀY`.
-3. Ứng dụng đọc các cột booking, lưu phiên nhập vào `.data/planner.db`, rồi cập nhật số dòng, tổng sản lượng và tổng lượt hình.
-4. Mở mục **Kế hoạch**, chọn đúng file trong danh sách để vào bảng điều phối của lần import đó.
-5. Khung **AI Local** tự kiểm tra dữ liệu trong SQLite và liệt kê các dòng cần xem lại.
+**Nhập → Kiểm tra → Xử lý → Xuất file**
 
-## Theo mã hàng (file kế toán kho)
+1. **Tổng quan → Nguồn dữ liệu** có 3 ô, mỗi ô nhận file Excel hoặc link:
+   - **Booking**: file booking của khách (sheet `TH`, hoặc `LEADTIME 1/2/3/5 NGÀY`).
+   - **Nhận**: file nhập BTP (sheet `DATA`, ví dụ `INKAVA_XUẤT NHẬP BTP NEW.xlsx`): số đã nhận và ngày nhận.
+   - **Giao**: file kế toán kho (sheet `TỔNG HỢP`): tổng giao, hỏng in, lỗi vải, giao đạt.
+2. AI local kiểm tra booking; cảnh báo hiện ngay dưới các chỉ số.
+3. Ứng dụng nối 3 nguồn theo **mã hàng + màu** và tính cho từng mã: SL hợp đồng, đã nhận, đã in, giao đạt, lỗi, còn thiếu, hạn giao, trạng thái.
+4. **Đợt booking**: chọn một tuần (theo ngày PXC CHUYỂN, Thứ Hai–Chủ Nhật) để chỉ theo dõi các dòng phân bổ trong tuần đó; số lượng là phần phân bổ của đợt, hạn giao là ngày PXI TRẢ. Mặc định là tuần hiện tại. Số đã nhận / giao đạt vẫn là lũy kế theo mã hàng vì file nhận/giao không tách theo đợt.
+5. **Xuất file tổng hợp** tạo một workbook mở đầu bằng sheet `TH` giống hệt sheet TH của file booking (tiêu đề ở dòng 1 và 5, PXC CHUYỂN / PXI TRẢ / TỔNG TUẦN / TỔNG NGÀY ở dòng 1–4, dòng trống giữa các nhóm leadtime; TỔNG NGÀY/TỔNG TUẦN được tính lại đúng), cột tiến độ theo mã đặt sau các cột ngày; tiếp theo là `TỔNG QUAN`, `THEO MÃ HÀNG`, `THEO KHÁCH HÀNG`, `CẢNH BÁO`, `THAY ĐỔI BOOKING`. Khi đang chọn một đợt, file chỉ gồm đợt đó. Booking mới nhất được chuyển sang mục **File đã làm**.
 
-Mục **Theo mã hàng** đọc sheet `TỔNG HỢP` của file kế toán kho (`.xlsm`/`.xlsx`) và cho từng mã hàng + màu của mỗi khách:
+Nhập bằng link: khi chạy `npm run dev`, máy chủ tải file từ link (SharePoint/OneDrive tự thêm `download=1`, Google Sheets tự xuất `.xlsx`). Link SharePoint nội bộ cần đăng nhập nên không tải được: đặt quyền chia sẻ “Bất kỳ ai có link” hoặc tải file về rồi chọn file. Bản Sites chỉ đọc được link cho phép tải chéo (CORS).
 
-- SL hợp đồng (SLHĐ, mỗi PO chỉ tính một lần), đã nhận BTP, đã in (tổng giao), giao đạt, lỗi (hỏng in + lỗi vải), còn phải giao.
+## Theo mã hàng
+
+- SL hợp đồng (SLHĐ, mỗi PO chỉ tính một lần), đã nhận BTP (ưu tiên file nhận, nếu chưa có thì lấy từ file kho), đã in (tổng giao), giao đạt, lỗi (hỏng in + lỗi vải), còn phải giao.
 - Mã có nhiều hình in (ORBIT/TRIBORD…) lấy số theo hình in có giao đạt thấp nhất; bấm vào dòng để xem từng hình in.
-- Hạn giao lấy từ file booking (khớp theo REF + COLOR), kèm số ngày còn lại hoặc số ngày trễ.
-- Trạng thái: Đã giao đủ, Đang in, Thiếu BTP, Chưa nhận BTP, Trễ hạn. Lọc theo khách hàng, trạng thái, tìm theo mã/màu.
+- Mã khách đã booking nhưng chưa có trong file nhận/giao hiện là **Chưa nhận BTP**.
+- Hạn giao lấy từ file booking, kèm số ngày còn lại hoặc số ngày trễ. Trạng thái: Đã giao đủ, Đang in, Thiếu BTP, Chưa nhận BTP, Trễ hạn, Sắp tới hạn (≤ 3 ngày chưa nhận BTP).
 
 ## Đối chiếu thay đổi booking
 
-Khách cập nhật thẳng vào file booking cũ, nên mỗi lần nhập lại, ứng dụng so sánh từng dòng (PO + REF + COLOR) với lần nhập trước và liệt kê dòng thêm mới, dòng bị xóa, dòng bị sửa (số lượng, INPUT, OUTPUT, leadtime, hình in, SLHĐ, số phiếu). Nút **Thay đổi booking** trên thanh trên báo số lần nhập chưa kiểm tra; người kiểm tra bấm **Đã kiểm tra** để ghi nhận.
+Khách cập nhật thẳng vào file booking cũ, nên mỗi lần nhập lại, ứng dụng so sánh từng dòng (PO + REF + COLOR) với lần nhập trước và liệt kê dòng thêm mới, dòng bị xóa, dòng bị sửa (số lượng, INPUT, OUTPUT, leadtime, hình in, SLHĐ, số phiếu, phân bổ theo ngày). Nút **Thay đổi booking** trên thanh trên báo số lần nhập chưa kiểm tra; người kiểm tra bấm **Đã kiểm tra** để ghi nhận.
 
 ## AI Local kiểm tra file
 
@@ -41,6 +46,10 @@ Bộ kiểm tra chạy hoàn toàn trong ứng dụng, không gọi API và khô
 - Ngày OUTPUT sớm hơn ngày INPUT.
 - Dòng có khả năng bị trùng.
 - Sản lượng ngoại lệ theo phân bố của file.
+- Hạn giao (OUTPUT) rơi vào Chủ Nhật (nhà máy làm Thứ Hai–Thứ Bảy).
+- SLHĐ TỔNG trống hoặc bằng 0 (công thức trong TH bỏ sót dòng).
+- Sheet `TH` lệch số lượng hoặc thiếu dòng so với các sheet `LEADTIME`.
+- `TỔNG NGÀY` trong `TH` khác Σ(HÌNH IN × phân bổ ngày), thường do công thức SUMPRODUCT lệch dòng.
 
 Khi chạy local, báo cáo được lưu trong bảng `ai_checks` của SQLite theo từng lần import. Trên website tĩnh, báo cáo được tính và lưu trong trình duyệt cùng metadata của file.
 
@@ -50,21 +59,9 @@ Mục **Tổng quan** phân loại lịch sử file thành:
 - File đã xử lý nhưng chưa giao.
 - File gốc chưa chỉnh sửa. Ứng dụng không ghi đè workbook tải lên; chỉ lưu dữ liệu đã đọc vào SQLite.
 
-Mục **Tổng quan** trả lời trực tiếp bốn chỉ tiêu: booking yêu cầu, lượt hình cần in, số lượng có thể in và số lượng có thể giao đúng hạn. Nếu chưa có định mức, ứng dụng để trống kết quả năng lực thay vì tạo số mô phỏng.
+Mục **Cấu hình** vẫn lưu danh mục định mức phút/máy, nhưng Tổng quan và Kế hoạch không còn dùng số phút/máy; kết quả dựa trên số nhận/giao thực tế.
 
-Mở mục **Cấu hình** hoặc nhấn vào chỉ số **Máy cần** để nhập định mức. Công thức:
-
-```text
-Tổng phút = lượt hình × phút/lượt hình + số PO × phút setup/PO
-Công suất mỗi máy = ca/ngày × phút/ca × hiệu suất × số ngày kế hoạch
-Máy cần = làm tròn lên(Tổng phút / Công suất mỗi máy)
-Mức đáp ứng = min(100%, Tổng công suất / Tổng phút cần)
-Số lượng có thể giao = sản lượng booking × Mức đáp ứng
-```
-
-Kết quả được chia theo leadtime 1/2/3/5 ngày. Lịch làm việc mặc định là Thứ Hai đến Thứ Bảy và bỏ qua Chủ Nhật. Đây là ước tính năng lực; cần xác nhận định mức thực tế với bộ phận sản xuất trước khi chốt kế hoạch.
-
-### Danh mục cấu hình định mức
+## Danh mục cấu hình định mức
 
 - Có thể nhập file Excel hoặc tạo từng định mức thủ công.
 - Khi nhập thủ công, ứng dụng gợi ý 19 máy/công đoạn hiện có tại nhà máy: nhóm OVAL, máy Tự Động, máy in K3, SẤY, ÉP, in BÀN và THÊU.

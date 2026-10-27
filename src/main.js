@@ -2,15 +2,19 @@ import '@phosphor-icons/web/regular';
 import './styles.css';
 import { analyzeBookingRows } from './local-ai.js';
 import { bestStandardSheet } from './config-ai.js';
-import { calculateCapacity } from './capacity.js';
-import { extractBookingRows, readWorkbook, summarizeBooking } from './booking-import.js';
+import { crossCheckSheets, readBooking, readWorkbook, summarizeBooking } from './booking-import.js';
+import { batchRows, defaultWeekKey, weeksFromDays } from './batches.js';
 import { workWeekLabel } from './calendar.js';
 import { DEMO_DASHBOARD } from './demo-data.js';
 import { escapeHtml, formatFileDate, formatNumber } from './format.js';
 import { readJson, writeJson } from './storage.js';
 import { appTemplate } from './template.js';
-import { PAGE_SIZE, customerLogo, matchesFilters, renderCustomerRows, renderKpis, renderModelRows } from './models-view.js';
+import { PAGE_SIZE, matchesFilters, renderCustomerRows, renderKpis, renderModelRows } from './models-view.js';
 import { readWarehouseWorkbook, summarizeWarehouse } from './warehouse-import.js';
+import { compactReceiptLines, readReceiptsWorkbook, summarizeReceipts } from './receipts-import.js';
+import { renderLeadtimeRows, renderWarnings } from './progress-view.js';
+import { downloadFromLink } from './sources.js';
+import { buildExportWorkbook, downloadWorkbook, exportFilename, sortByUrgency } from './export-workbook.js';
 import { compactRows, diffBookingRows } from './booking-diff.js';
 import { renderChangeList, renderChangeReport, unreviewedCount } from './changes-view.js';
 
@@ -29,6 +33,14 @@ const defaultSettings = {
 };
 
 let dashboardState = fallbackDashboard;
+// The newest booking import; the overview and product joins always use it, whichever plan is open.
+let latestBooking = fallbackDashboard;
+let latestAiReport = null;
+// Full rows and day plan of the newest booking, used for batches and the export.
+const EMPTY_DETAIL = { importId: null, filename: null, days: [], rows: [] };
+let bookingDetail = EMPTY_DETAIL;
+// 'all', a week key (its Monday), or null until the first booking picks the current week.
+let batchKey = readJson('planner-batch', null);
 let settingsState = { ...defaultSettings };
 let activeImportId = fallbackDashboard.importId;
 let standardsState = [];
@@ -55,9 +67,7 @@ function renderDashboard(data) {
   document.querySelector('#rowCount').textContent = `${formatNumber.format(data.rowCount)} dòng booking`;
   document.querySelector('#totalQuantity').textContent = formatNumber.format(data.totalQuantity);
   document.querySelector('#totalImpressions').textContent = formatNumber.format(data.totalImpressions);
-  document.querySelector('#overviewBooking').textContent = formatNumber.format(data.totalQuantity);
-  document.querySelector('#overviewImpressions').textContent = formatNumber.format(data.totalImpressions);
-  renderMachineCalculation();
+  renderPlanProgress();
 }
 
 function emptyHistory(label) {
@@ -77,24 +87,24 @@ function saveBrowserFiles(files) {
   if (!writeJson('planner-file-history', files.filter((file) => file.id !== 'demo-original'))) showToast('Trình duyệt không cho lưu lịch sử file.', 'error');
 }
 
-async function markFile(fileId, category) {
+async function markFile(fileId, category, note = null) {
   const file = fileHistoryState.find((item) => String(item.id) === fileId);
   if (!file || file.id === 'demo-original') throw new Error('Không tìm thấy file đã nhập.');
   const expected = file.category === 'original' ? 'processed' : file.category === 'processed' ? 'delivered' : null;
   if (category !== expected) throw new Error('Trạng thái file không hợp lệ.');
   if (isStaticPages) {
     if (!fileHistoryState.some((item) => item.importId === file.importId && item.category === category)) {
-      const files = [{ ...file, id: crypto.randomUUID(), category, createdAt: new Date().toISOString(), note: category === 'processed' ? 'Người dùng xác nhận đã xử lý.' : 'Người dùng xác nhận đã giao.' }, ...fileHistoryState];
+      const files = [{ ...file, id: crypto.randomUUID(), category, createdAt: new Date().toISOString(), note: note || (category === 'processed' ? 'Người dùng xác nhận đã xử lý.' : 'Người dùng xác nhận đã giao.') }, ...fileHistoryState];
       saveBrowserFiles(files);
       renderFileHistory(files);
     }
   } else {
-    const response = await fetch('/api/files', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileId: file.id, category }) });
+    const response = await fetch('/api/files', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileId: file.id, category, note }) });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || 'Không thể cập nhật file.');
     renderFileHistory(payload.files);
   }
-  showToast(category === 'processed' ? 'Đã ghi nhận file đã xử lý.' : 'Đã ghi nhận file đã giao.');
+  if (!note) showToast(category === 'processed' ? 'Đã ghi nhận file đã xử lý.' : 'Đã ghi nhận file đã giao.');
 }
 
 function fileRow(file) {
@@ -303,12 +313,12 @@ function showPage(pageName) {
   document.querySelector('#configView').hidden = !isConfig;
   document.querySelector('#planningView').hidden = true;
   document.querySelector('#backToPlans').hidden = true;
-  document.querySelector('#importButton').hidden = isConfig || isModels;
+  document.querySelector('#importButton').hidden = !isPlanList;
   const [eyebrow, title] = PAGE_COPY[pageName];
   document.querySelector('#pageEyebrow').textContent = eyebrow;
   document.querySelector('#pageTitle').textContent = title;
   if (isOverview || isPlanList) loadFileHistory();
-  if (isModels) loadWarehouse();
+  if (isModels) loadSources();
   if (isConfig) loadStandards();
 }
 
@@ -356,7 +366,7 @@ function renderAiCheck(report) {
   container.innerHTML = report.findings.map((finding) => `
     <article class="ai-finding ai-finding--${escapeHtml(finding.severity)}">
       <i class="ph ph-${finding.severity === 'danger' ? 'warning-circle' : finding.severity === 'warning' ? 'warning' : 'chart-line-up'}"></i>
-      <div><strong>${escapeHtml(finding.title)}</strong><span>${formatNumber.format(finding.count)} dòng · ${escapeHtml(finding.description)}</span>${finding.samples?.length ? `<small>Ví dụ: ${finding.samples.map((sample) => `dòng ${formatNumber.format(sample.row)} / PO ${escapeHtml(sample.po)}`).join(', ')}</small>` : ''}</div>
+      <div><strong>${escapeHtml(finding.title)}</strong><span>${formatNumber.format(finding.count)} dòng · ${escapeHtml(finding.description)}</span>${finding.samples?.length ? `<small>Ví dụ: ${finding.samples.map((sample) => (sample.note ? `${escapeHtml(sample.row)}: ${escapeHtml(sample.note)}` : `dòng ${formatNumber.format(sample.row)} / PO ${escapeHtml(sample.po)}`)).join(', ')}</small>` : ''}</div>
     </article>
   `).join('');
 }
@@ -379,154 +389,15 @@ async function loadAiCheck(importId, force = false) {
   }
 }
 
-function assuranceCopy(calculation) {
-  if (!calculation) return { label: 'Chưa đủ cấu hình', state: 'pending', icon: 'info' };
-  if (calculation.coverageRate >= 1) return { label: 'Đảm bảo theo năng lực', state: 'ok', icon: 'check-circle' };
-  if (calculation.coverageRate >= 0.9) return { label: 'Có nguy cơ trễ', state: 'warn', icon: 'warning' };
-  return { label: 'Chưa đảm bảo', state: 'danger', icon: 'warning-circle' };
-}
-
-function shortDay(isoDate) {
-  const match = String(isoDate || '').match(/^\d{4}-(\d{2})-(\d{2})/);
-  return match ? `${match[2]}/${match[1]}` : null;
-}
-
-function dateRange(first, last) {
-  const from = shortDay(first);
-  const to = shortDay(last);
-  if (!from) return '—';
-  return !to || from === to ? from : `${from} – ${to}`;
-}
-
-function customerCell(customers = []) {
-  if (!customers.length) return '—';
-  const shown = customers.slice(0, 3).map((customer) => `
-    <span class="customer-chip" title="${escapeHtml(customer.name)}: ${formatNumber.format(customer.totalQuantity)} sản phẩm">
-      ${customerLogo(customer.name)}<span>${escapeHtml(customer.name)}</span>
-    </span>`).join('');
-  const more = customers.length > 3 ? `<small>+${formatNumber.format(customers.length - 3)} khách</small>` : '';
-  return `<div class="customer-list">${shown}${more}</div>`;
-}
-
-const countOrDash = (value) => (value == null ? '—' : formatNumber.format(value));
-
-function leadtimeRows(calculation) {
-  const groups = dashboardState.leadTimes || [];
-  if (!groups.length) return '<tr><td colspan="9" class="delivery-table__empty">File chưa có dữ liệu leadtime.</td></tr>';
-  const copy = assuranceCopy(calculation);
-  return groups.map((group) => {
-    const quantity = Number(group.totalQuantity || 0);
-    const deliverable = calculation ? Math.floor(quantity * calculation.coverageRate) : null;
-    const shortage = deliverable == null ? null : Math.max(0, quantity - deliverable);
-    const dueDate = shortDay(group.lastOutput);
-    return `<tr>
-      <th>${escapeHtml(group.leadTime)}${dueDate ? `<small>Hạn ${dueDate}</small>` : ''}</th>
-      <td class="delivery-table__customers">${customerCell(group.customers)}</td>
-      <td>${countOrDash(group.modelCount)}<small>mã</small></td>
-      <td>${countOrDash(group.poCount)}<small>hợp đồng</small></td>
-      <td><strong>${formatNumber.format(quantity)}</strong><small>${formatNumber.format(group.rowCount || 0)} dòng</small></td>
-      <td>${formatNumber.format(quantity)}<small>Nhập ${dateRange(group.firstInput, group.lastInput)}</small></td>
-      <td>${deliverable == null ? '—' : formatNumber.format(deliverable)}<small>Xuất ${dateRange(group.firstOutput, group.lastOutput)}</small></td>
-      <td>${shortage == null ? '—' : formatNumber.format(shortage)}</td>
-      <td><span class="result-pill result-pill--${copy.state}">${copy.label}</span></td>
-    </tr>`;
-  }).join('');
-}
-
-function renderMachineCalculation() {
-  const calculation = calculateCapacity(dashboardState, settingsState);
-  const copy = assuranceCopy(calculation);
-  const overviewAssurance = document.querySelector('#overviewAssurance');
-  overviewAssurance.className = `assurance-badge assurance-badge--${copy.state}`;
-  overviewAssurance.innerHTML = `<i class="ph ph-${copy.icon}"></i><span><small>Kết luận</small><strong>${copy.label}</strong></span>`;
-  document.querySelector('#overviewLeadtimeBody').innerHTML = leadtimeRows(calculation);
-  document.querySelector('#planLeadtimeBody').innerHTML = leadtimeRows(calculation);
-  if (!calculation) {
-    ['#printableQuantity', '#deliverableQuantity', '#overviewPrintable', '#overviewDeliverable', '#requiredMinutes', '#availableMinutes', '#coverageRate'].forEach((selector) => {
-      document.querySelector(selector).textContent = '—';
-    });
-    document.querySelector('#planShortage').textContent = 'Chờ cấu hình định mức';
-    document.querySelector('#overviewShortage').textContent = 'Cần cấu hình định mức';
-    document.querySelector('#machinesRequired').textContent = 'Cấu hình năng lực';
-    document.querySelector('#machineMetricMeta').textContent = 'Nhập phút và số máy';
-    const planAssurance = document.querySelector('#planAssurance');
-    planAssurance.className = 'plan-assurance plan-assurance--pending';
-    planAssurance.querySelector('strong').textContent = copy.label;
-    return;
-  }
-  document.querySelector('#printableQuantity').textContent = formatNumber.format(calculation.printableQuantity);
-  document.querySelector('#deliverableQuantity').textContent = formatNumber.format(calculation.deliverableQuantity);
-  document.querySelector('#overviewPrintable').textContent = formatNumber.format(calculation.printableQuantity);
-  document.querySelector('#overviewDeliverable').textContent = formatNumber.format(calculation.deliverableQuantity);
-  const shortageText = calculation.shortageQuantity
-    ? `Thiếu ${formatNumber.format(calculation.shortageQuantity)} sản phẩm`
-    : 'Đủ theo booking';
-  document.querySelector('#planShortage').textContent = shortageText;
-  document.querySelector('#overviewShortage').textContent = shortageText;
-  document.querySelector('#requiredMinutes').textContent = formatNumber.format(Math.round(calculation.requiredMinutes));
-  document.querySelector('#availableMinutes').textContent = formatNumber.format(Math.round(calculation.availableMinutes));
-  document.querySelector('#coverageRate').textContent = `${formatNumber.format(Math.round(calculation.coverageRate * 100))}%`;
-  document.querySelector('#machinesRequired').textContent = `${formatNumber.format(calculation.machinesRequired)} máy cần`;
-  document.querySelector('#machineMetricMeta').textContent = calculation.gap >= 0
-    ? `Đang có ${formatNumber.format(settingsState.machineCount)} máy`
-    : `Thiếu ${formatNumber.format(Math.abs(calculation.gap))} máy`;
-  const planAssurance = document.querySelector('#planAssurance');
-  planAssurance.className = `plan-assurance plan-assurance--${copy.state}`;
-  planAssurance.querySelector('strong').textContent = copy.label;
-}
-
-function fillSettingsForm(settings = settingsState) {
-  const form = document.querySelector('#settingsForm');
-  Object.entries(settings).forEach(([name, value]) => {
-    if (form.elements[name]) form.elements[name].value = value ?? '';
-  });
-  renderCalculationPreview();
-}
-
-function settingsFromForm() {
-  const form = document.querySelector('#settingsForm');
-  return Object.fromEntries([...new FormData(form)].map(([key, value]) => [key, Number(value)]));
-}
-
-function renderCalculationPreview() {
-  const preview = document.querySelector('#calculationPreview');
-  const calculation = calculateCapacity(dashboardState, settingsFromForm());
-  if (!calculation) {
-    preview.innerHTML = '<i class="ph ph-calculator"></i><span>Nhập phút/lượt hình và số máy để xem kết quả.</span>';
-    return;
-  }
-  preview.innerHTML = `
-    <div><span>Tổng phút cần</span><strong>${formatNumber.format(Math.round(calculation.requiredMinutes))}</strong></div>
-    <div><span>Công suất / máy</span><strong>${formatNumber.format(Math.round(calculation.capacityPerMachine))} phút</strong></div>
-    <div><span>Máy cần</span><strong>${formatNumber.format(calculation.machinesRequired)}</strong></div>
-  `;
-}
-
-function openSettings() {
-  fillSettingsForm();
-  const modal = document.querySelector('#settingsModal');
-  modal.classList.add('modal--open');
-  modal.setAttribute('aria-hidden', 'false');
-  modal.querySelector('input')?.focus();
-}
-
-function closeSettings() {
-  const modal = document.querySelector('#settingsModal');
-  modal.classList.remove('modal--open');
-  modal.setAttribute('aria-hidden', 'true');
-}
-
 async function loadSettings() {
   if (isStaticPages) {
     settingsState = { ...defaultSettings, ...readJson('planner-settings', {}) };
-    renderMachineCalculation();
     return;
   }
   try {
     const response = await fetch('/api/settings');
     if (!response.ok) throw new Error();
     settingsState = { ...defaultSettings, ...await response.json() };
-    renderMachineCalculation();
   } catch {
     settingsState = { ...defaultSettings };
   }
@@ -544,7 +415,6 @@ async function persistSettings(settings) {
     if (!response.ok) throw new Error(payload.error || 'Không thể lưu cấu hình.');
     settingsState = payload;
   }
-  renderMachineCalculation();
 }
 
 async function applyStandardToPlan(standard, updateDefault = true) {
@@ -570,42 +440,140 @@ async function applyStandardToPlan(standard, updateDefault = true) {
   }
 }
 
-let warehouseState = { filename: null, importedAt: null, lines: [] };
+const EMPTY_SOURCE = { filename: null, origin: null, importedAt: null, lines: [] };
+const sourceState = { receipts: { ...EMPTY_SOURCE }, deliveries: { ...EMPTY_SOURCE } };
 let warehouseSummary = null;
 const modelFilters = { customer: '', status: 'open', query: '' };
 let expandedModelKey = null;
 let modelLimit = PAGE_SIZE;
 
-function latestBookingModels() {
-  if (dashboardState.models?.length) return dashboardState.models;
-  return fileHistoryState.find((file) => file.category === 'original' && file.models?.length)?.models || [];
+function sourceMeta(source, detail) {
+  if (!source?.filename) return '<span class="muted">Chưa có dữ liệu</span>';
+  const origin = source.origin ? ' · từ link' : '';
+  return `<strong title="${escapeHtml(source.filename)}">${escapeHtml(source.filename)}</strong><span>${escapeHtml(formatFileDate(source.importedAt))}${origin} · ${detail}</span>`;
+}
+
+function renderSources() {
+  const booking = latestBooking.source === 'demo' ? null : latestBooking;
+  document.querySelector('#sourceMeta-booking').innerHTML = booking
+    ? sourceMeta({ filename: booking.filename, importedAt: booking.importedAt || booking.createdAt }, `${formatNumber.format(booking.rowCount)} dòng · ${formatNumber.format(booking.models?.length || 0)} mã hàng`)
+    : '<span class="muted">Đang hiện dữ liệu mẫu</span>';
+  const receiptCount = sourceState.receipts.lines.reduce((sum, line) => sum + (line.receipts ?? 1), 0);
+  document.querySelector('#sourceMeta-receipts').innerHTML = sourceMeta(sourceState.receipts, `${formatNumber.format(receiptCount)} lần nhận`);
+  document.querySelector('#sourceMeta-deliveries').innerHTML = sourceMeta(sourceState.deliveries, `${formatNumber.format(sourceState.deliveries.lines.length)} dòng PO`);
 }
 
 function renderWarehouse() {
-  warehouseSummary = summarizeWarehouse(warehouseState.lines, latestBookingModels());
+  const booking = activeBooking();
+  renderBatchOptions();
+  warehouseSummary = summarizeWarehouse(sourceState.deliveries.lines, {
+    bookingModels: booking.models || [],
+    receipts: sourceState.receipts.lines.length ? summarizeReceipts(sourceState.receipts.lines) : null,
+    batchMode: Boolean(booking.batch)
+  });
   const { items, totals, customers } = warehouseSummary;
-  document.querySelector('#warehouseMeta').textContent = warehouseState.filename
-    ? `${warehouseState.filename} · nhập ${formatFileDate(warehouseState.importedAt)} · ${formatNumber.format(items.length)} mã hàng của ${formatNumber.format(customers.length)} khách`
-    : 'Chưa có file kế toán kho. Nhấn “Nhập file kho” để tải sheet TỔNG HỢP.';
-  document.querySelector('#modelKpis').innerHTML = renderKpis(totals);
+  const names = [sourceState.receipts.filename && `nhận: ${sourceState.receipts.filename}`, sourceState.deliveries.filename && `giao: ${sourceState.deliveries.filename}`].filter(Boolean);
+  document.querySelector('#warehouseMeta').textContent = names.length
+    ? `${names.join(' · ')} · ${formatNumber.format(items.length)} mã hàng của ${formatNumber.format(customers.length)} khách`
+    : 'Chưa có dữ liệu nhận/giao. Nhập ở mục Tổng quan → Nguồn dữ liệu.';
+  document.querySelector('#modelKpis').innerHTML = renderKpis(totals, { batch: Boolean(booking.batch) });
   const select = document.querySelector('#customerFilter');
   select.innerHTML = `<option value="">Tất cả khách hàng</option>${[...customers].sort((a, b) => a.localeCompare(b, 'vi')).map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')}`;
   select.value = modelFilters.customer;
   renderModelTable();
+  renderOverview();
+  renderPlanProgress();
+}
+
+function bookingWeeks() {
+  return weeksFromDays(bookingDetail.days);
+}
+
+function selectedWeek() {
+  const weeks = bookingWeeks();
+  if (!weeks.length) return null;
+  if (!batchKey || (batchKey !== 'all' && !weeks.some((week) => week.key === batchKey))) batchKey = defaultWeekKey(weeks);
+  return batchKey === 'all' ? null : weeks.find((week) => week.key === batchKey);
+}
+
+// The booking as the rest of the page sees it: the whole file, or only the selected batch.
+function activeBooking() {
+  const week = selectedWeek();
+  if (!week) return { ...latestBooking, rows: bookingDetail.rows, days: bookingDetail.days };
+  const rows = batchRows(bookingDetail.rows, bookingDetail.days, week);
+  const days = week.dayIndexes.map((index) => bookingDetail.days[index]);
+  // Re-key allocations to the batch's own day list for the export.
+  const position = new Map(week.dayIndexes.map((index, order) => [String(index), String(order)]));
+  const batchOnly = rows.map((row) => ({ ...row, allocations: Object.fromEntries(Object.entries(row.allocations).map(([index, value]) => [position.get(index), value])) }));
+  return { ...latestBooking, ...summarizeBooking(rows), batch: week, rows: batchOnly, days };
+}
+
+function renderBatchOptions() {
+  const weeks = bookingWeeks();
+  selectedWeek();
+  const options = weeks.length
+    ? [`<option value="all">Tất cả booking</option>`, ...weeks.map((week) => {
+      const count = bookingDetail.rows.filter((row) => week.dayIndexes.some((index) => String(index) in (row.allocations || {}))).length;
+      return `<option value="${week.key}">${escapeHtml(week.label)} · ${formatNumber.format(count)} dòng</option>`;
+    })].join('')
+    : '<option value="all">Tất cả booking (file chưa có phân bổ ngày)</option>';
+  document.querySelectorAll('[data-batch-select]').forEach((select) => {
+    select.innerHTML = options;
+    select.value = weeks.length ? batchKey : 'all';
+    select.disabled = !weeks.length;
+  });
+}
+
+async function loadBookingDetail() {
+  bookingDetail = EMPTY_DETAIL;
+  if (latestBooking.source === 'demo') return;
+  if (isStaticPages) {
+    const stored = readJson('planner-booking-rows', null);
+    if (stored && String(stored.importId) === String(latestBooking.importId)) bookingDetail = { days: [], ...stored };
+    return;
+  }
+  try {
+    const response = await fetch(`/api/booking-rows?id=${encodeURIComponent(latestBooking.importId)}`);
+    if (response.ok) bookingDetail = { importId: latestBooking.importId, ...await response.json() };
+  } catch {
+    bookingDetail = EMPTY_DETAIL;
+  }
+}
+
+function renderOverview() {
+  renderSources();
+  if (!warehouseSummary) return;
+  document.querySelector('#overviewKpis').innerHTML = renderKpis(warehouseSummary.totals, { batch: Boolean(activeBooking().batch) });
+  document.querySelector('#overviewWarnings').innerHTML = renderWarnings(warehouseSummary.totals, latestAiReport);
+  const booking = activeBooking();
+  document.querySelector('#overviewLeadtimeBody').innerHTML = renderLeadtimeRows(booking, warehouseSummary);
+  document.querySelector('#overviewMeta').textContent = latestBooking.source === 'demo'
+    ? 'Đang hiện booking mẫu. Nhập file booking thật ở mục Nguồn dữ liệu.'
+    : booking.batch
+      ? `${booking.batch.label}: ${formatNumber.format(booking.rowCount)} dòng, ${formatNumber.format(booking.totalQuantity)} sản phẩm phân bổ trong đợt · SL hợp đồng = số lượng của đợt.`
+      : `Booking: ${latestBooking.filename} · số nhận/giao lấy từ file nhận và file giao mới nhất.`;
+}
+
+function renderPlanProgress() {
+  document.querySelector('#planLeadtimeBody').innerHTML = renderLeadtimeRows(dashboardState, warehouseSummary);
+  const keys = new Set((dashboardState.models || []).map((model) => `${model.model}|${model.color}`));
+  const matched = (warehouseSummary?.items || []).filter((item) => item.sources.booking && keys.has(`${item.model}|${item.color}`));
+  const sum = (field) => matched.reduce((total, item) => total + item[field], 0);
+  document.querySelector('#planReceived').textContent = matched.length ? formatNumber.format(sum('received')) : '—';
+  document.querySelector('#planGood').textContent = matched.length ? formatNumber.format(sum('good')) : '—';
+  const meta = matched.length ? `${formatNumber.format(matched.filter((item) => item.received > 0).length)} / ${formatNumber.format(keys.size)} mã đã nhận BTP` : 'Chưa có số liệu nhận/giao';
+  document.querySelector('#planReceivedMeta').textContent = meta;
+  document.querySelector('#planGoodMeta').textContent = matched.length ? `${formatNumber.format(matched.filter((item) => item.status === 'done').length)} mã giao đủ` : 'Chưa có số liệu nhận/giao';
 }
 
 function renderModelTable() {
   if (!warehouseSummary) return;
   const scoped = warehouseSummary.items.filter((item) => matchesFilters(item, { ...modelFilters, status: 'all' }));
-  const filtered = scoped.filter((item) => matchesFilters(item, modelFilters));
-  // Unfinished work first: overdue, then nearest due date, then largest remaining quantity.
-  filtered.sort((a, b) => (b.overdue - a.overdue)
-    || ((a.daysToDue ?? Infinity) - (b.daysToDue ?? Infinity))
-    || (b.remaining - a.remaining));
+  const filtered = sortByUrgency(scoped.filter((item) => matchesFilters(item, modelFilters)));
   document.querySelector('#customerBody').innerHTML = renderCustomerRows(
     warehouseSummary.items.filter((item) => matchesFilters(item, { query: modelFilters.query, status: 'all' })),
     modelFilters.customer
-  ) || '<tr><td colspan="8" class="delivery-table__empty">Chưa có dữ liệu kho.</td></tr>';
+  ) || '<tr><td colspan="8" class="delivery-table__empty">Chưa có dữ liệu.</td></tr>';
   document.querySelector('#modelBody').innerHTML = renderModelRows(filtered, expandedModelKey, modelLimit);
   document.querySelectorAll('[data-status-count]').forEach((badge) => {
     badge.textContent = formatNumber.format(scoped.filter((item) => matchesFilters(item, { status: badge.dataset.statusCount })).length);
@@ -615,30 +583,90 @@ function renderModelTable() {
   document.querySelector('#showMoreModels').hidden = filtered.length <= modelLimit;
 }
 
-async function loadWarehouse() {
-  if (isStaticPages) {
-    warehouseState = readJson('planner-warehouse', warehouseState);
-  } else {
+async function loadSources() {
+  for (const kind of Object.keys(sourceState)) {
+    if (isStaticPages) {
+      sourceState[kind] = readJson(`planner-source-${kind}`, null)
+        // Earlier builds kept the warehouse file under its own key.
+        || (kind === 'deliveries' ? readJson('planner-warehouse', null) : null)
+        || { ...EMPTY_SOURCE };
+      continue;
+    }
     try {
-      const response = await fetch('/api/warehouse');
-      if (response.ok) warehouseState = await response.json();
+      const response = await fetch(`/api/sources?kind=${kind}`);
+      if (response.ok) sourceState[kind] = await response.json();
     } catch {
-      showToast('Không đọc được dữ liệu kho từ SQLite.', 'error');
+      showToast('Không đọc được dữ liệu nhận/giao từ SQLite.', 'error');
     }
   }
   renderWarehouse();
 }
 
-async function saveWarehouse(snapshot) {
+async function saveSource(kind, snapshot) {
   if (isStaticPages) {
-    if (!writeJson('planner-warehouse', snapshot)) throw new Error('Trình duyệt không đủ chỗ lưu file kho.');
-    warehouseState = snapshot;
+    if (!writeJson(`planner-source-${kind}`, snapshot)) throw new Error('Trình duyệt không đủ chỗ lưu file này.');
+    sourceState[kind] = snapshot;
     return;
   }
-  const response = await fetch('/api/warehouse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(snapshot) });
+  const response = await fetch(`/api/sources?kind=${kind}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(snapshot) });
   const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error || 'Không thể lưu file kho.');
-  warehouseState = payload;
+  if (!response.ok) throw new Error(payload.error || 'Không thể lưu dữ liệu.');
+  sourceState[kind] = payload;
+}
+
+async function importSource(kind, buffer, filename, origin = null) {
+  if (kind === 'booking') return importBooking(buffer, filename, origin);
+  const lines = kind === 'receipts' ? readReceiptsWorkbook(buffer).lines : readWarehouseWorkbook(buffer);
+  if (!lines.length) throw new Error('File không có dòng dữ liệu hợp lệ.');
+  const stored = kind === 'receipts' && isStaticPages ? compactReceiptLines(lines) : lines;
+  await saveSource(kind, { filename, origin, importedAt: new Date().toISOString(), lines: stored });
+  expandedModelKey = null;
+  modelLimit = PAGE_SIZE;
+  renderWarehouse();
+  showToast(kind === 'receipts'
+    ? `Đã đọc ${formatNumber.format(lines.length)} lần nhận BTP.`
+    : `Đã đọc ${formatNumber.format(lines.length)} dòng PO từ file giao.`);
+  return null;
+}
+
+async function loadLatestAiReport() {
+  latestAiReport = null;
+  if (latestBooking.source === 'demo') return;
+  if (isStaticPages) {
+    latestAiReport = fileHistoryState.find((file) => String(file.importId) === String(latestBooking.importId) && file.aiReport)?.aiReport || null;
+    return;
+  }
+  try {
+    const response = await fetch(`/api/ai-check?id=${encodeURIComponent(latestBooking.importId)}`);
+    if (response.ok) latestAiReport = await response.json();
+  } catch {
+    latestAiReport = null;
+  }
+}
+
+async function exportSummary() {
+  if (!warehouseSummary) throw new Error('Chưa có dữ liệu để xuất.');
+  const booking = activeBooking();
+  const filename = exportFilename(new Date(), booking.batch);
+  const change = changesState.find((item) => String(item.importId) === String(latestBooking.importId)) || null;
+  const workbook = buildExportWorkbook({
+    summary: warehouseSummary,
+    dashboard: booking,
+    booking,
+    aiReport: latestAiReport,
+    change,
+    sources: [
+      { title: 'Booking', filename: latestBooking.source === 'demo' ? null : latestBooking.filename, importedAt: latestBooking.importedAt },
+      { title: 'Nhận', ...sourceState.receipts },
+      { title: 'Giao', ...sourceState.deliveries }
+    ]
+  });
+  downloadWorkbook(workbook, filename);
+  // The export is the "processed" result of the newest booking file.
+  const original = fileHistoryState.find((file) => file.category === 'original' && String(file.importId) === String(latestBooking.importId));
+  const alreadyProcessed = fileHistoryState.some((file) => file.category === 'processed' && String(file.importId) === String(latestBooking.importId));
+  if (original && !alreadyProcessed) await markFile(String(original.id), 'processed', `Đã xuất file ${filename}`);
+  showToast(`Đã xuất ${filename}.`);
 }
 
 let changesState = [];
@@ -709,15 +737,16 @@ async function markChangesReviewed(importId) {
   renderChanges();
 }
 
-// Browser mode keeps the previous booking rows so the next import can be compared with them.
-function diffWithPreviousBrowserImport(rows, filename) {
+// Browser mode keeps the previous booking (rows + day plan) so the next import can be compared
+// with it; the same copy feeds batches and the export.
+function diffWithPreviousBrowserImport({ rows, days }, filename, importId) {
   const previous = readJson('planner-booking-rows', null);
   const compact = compactRows(rows);
-  if (!writeJson('planner-booking-rows', { filename, rows: compact })) {
-    showToast('Trình duyệt không đủ chỗ lưu bản booking để đối chiếu lần sau.', 'error');
+  if (!writeJson('planner-booking-rows', { importId, filename, days, rows: compact })) {
+    showToast('Trình duyệt không đủ chỗ lưu bản booking để đối chiếu và chia đợt.', 'error');
   }
   if (!previous?.rows?.length) return null;
-  const report = diffBookingRows(previous.rows, compact);
+  const report = diffBookingRows(previous.rows, compact, { previousDays: previous.days, currentDays: days });
   return report.hasChanges ? { previousFilename: previous.filename, createdAt: new Date().toISOString(), reviewedAt: null, report } : null;
 }
 
@@ -730,30 +759,43 @@ function showToast(message, type = 'success') {
   toastTimer = setTimeout(() => { toast.className = 'toast'; }, 3200);
 }
 
+function browserDashboard(file) {
+  return {
+    source: 'browser',
+    importId: file.importId,
+    filename: file.filename,
+    importedAt: file.createdAt,
+    rowCount: Number(file.rowCount || 0),
+    totalQuantity: Number(file.totalQuantity || 0),
+    totalImpressions: Number(file.totalImpressions || 0),
+    uniquePo: Number(file.uniquePo || 0),
+    leadTimes: file.leadTimes || [],
+    models: file.models || []
+  };
+}
+
+// Without an id this loads the newest booking, which also becomes the overview's booking.
 async function loadDashboard(importId = null) {
+  let data = fallbackDashboard;
   if (isStaticPages) {
-    const selectedPlan = importId && importId !== fallbackDashboard.importId
-      ? fileHistoryState.find((file) => file.category === 'original' && String(file.importId) === String(importId))
-      : null;
-    renderDashboard(selectedPlan ? {
-      source: 'browser',
-      importId: selectedPlan.importId,
-      filename: selectedPlan.filename,
-      rowCount: Number(selectedPlan.rowCount || 0),
-      totalQuantity: Number(selectedPlan.totalQuantity || 0),
-      totalImpressions: Number(selectedPlan.totalImpressions || 0),
-      uniquePo: Number(selectedPlan.uniquePo || 0),
-      leadTimes: selectedPlan.leadTimes || []
-    } : fallbackDashboard);
-    return;
+    const originals = fileHistoryState.filter((file) => file.category === 'original' && file.id !== 'demo-original');
+    const selected = importId ? originals.find((file) => String(file.importId) === String(importId)) : originals[0];
+    if (selected) data = browserDashboard(selected);
+  } else {
+    try {
+      const response = await fetch(importId ? `/api/dashboard?id=${encodeURIComponent(importId)}` : '/api/dashboard');
+      if (!response.ok) throw new Error('API không khả dụng');
+      data = await response.json();
+    } catch {
+      data = fallbackDashboard;
+    }
   }
-  try {
-    const response = await fetch(importId ? `/api/dashboard?id=${encodeURIComponent(importId)}` : '/api/dashboard');
-    if (!response.ok) throw new Error('API không khả dụng');
-    renderDashboard(await response.json());
-  } catch {
-    renderDashboard(fallbackDashboard);
+  if (!importId) {
+    latestBooking = data;
+    await Promise.all([loadLatestAiReport(), loadBookingDetail()]);
   }
+  renderDashboard(data);
+  renderWarehouse();
 }
 
 document.querySelector('#overviewView').addEventListener('click', async (event) => {
@@ -765,76 +807,129 @@ document.querySelector('#overviewView').addEventListener('click', async (event) 
   finally { button.disabled = false; }
 });
 
+// Reads a booking workbook (from a file or a link) and stores it; returns the new import id.
+async function importBooking(buffer, filename, origin = null) {
+  const workbook = readWorkbook(buffer);
+  const { rows, days } = readBooking(workbook);
+  if (!rows.length) throw new Error('Không tìm thấy dữ liệu booking hợp lệ (sheet TH hoặc LEADTIME).');
+  const sheetCheck = crossCheckSheets(workbook);
+  const summary = summarizeBooking(rows);
+  let importId;
+  let hasChanges;
+  if (isStaticPages) {
+    importId = crypto.randomUUID();
+    const changes = diffWithPreviousBrowserImport({ rows, days }, filename, importId);
+    hasChanges = Boolean(changes);
+    const files = [{
+      id: importId,
+      importId,
+      category: 'original',
+      filename,
+      origin,
+      createdAt: new Date().toISOString(),
+      ...summary,
+      aiReport: analyzeBookingRows(rows, { sheetCheck }),
+      changes,
+      note: 'Chỉ lưu thông tin file; file Excel gốc không bị thay đổi.'
+    }, ...fileHistoryState.filter((item) => item.id !== 'demo-original')];
+    saveBrowserFiles(files);
+    renderFileHistory(files);
+  } else {
+    const response = await fetch('/api/imports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename, rows, days, sheetCheck })
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Không thể lưu dữ liệu vào SQLite.');
+    importId = payload.importId;
+    hasChanges = Boolean(payload.changes);
+    await loadFileHistory();
+  }
+  batchKey = null;
+  await loadDashboard();
+  await loadChanges();
+  if (hasChanges) {
+    openChanges(importId);
+    showToast('File booking có thay đổi so với bản trước, hãy kiểm tra.', 'info');
+  } else {
+    showToast(`Đã nhập ${formatNumber.format(summary.rowCount)} dòng booking.`);
+  }
+  return importId;
+}
+
+async function withBusyButton(button, busyLabel, task) {
+  const label = button.innerHTML;
+  button.disabled = true;
+  button.innerHTML = `<i class="ph ph-spinner-gap spin"></i>${busyLabel}`;
+  try {
+    return await task();
+  } catch (error) {
+    showToast(error.message, 'error');
+    return null;
+  } finally {
+    button.disabled = false;
+    button.innerHTML = label;
+  }
+}
+
+// The Kế hoạch page keeps its own import button and opens the new plan right away.
 document.querySelector('#importButton').addEventListener('click', () => document.querySelector('#fileInput').click());
 document.querySelector('#fileInput').addEventListener('change', async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
-  const button = document.querySelector('#importButton');
-  button.disabled = true;
-  button.innerHTML = '<i class="ph ph-spinner-gap spin"></i>Đang xử lý';
-  try {
-    const rows = extractBookingRows(readWorkbook(await file.arrayBuffer()));
-    if (!rows.length) throw new Error('Không tìm thấy dữ liệu booking hợp lệ.');
-    const summary = summarizeBooking(rows);
-    if (isStaticPages) {
-      const importId = crypto.randomUUID();
-      const changes = diffWithPreviousBrowserImport(rows, file.name);
-      const files = [{
-        id: importId,
-        importId,
-        category: 'original',
-        filename: file.name,
-        createdAt: new Date().toISOString(),
-        ...summary,
-        aiReport: analyzeBookingRows(rows),
-        changes,
-        note: 'Chỉ lưu thông tin file; file Excel gốc không bị thay đổi.'
-      }, ...fileHistoryState.filter((item) => item.id !== 'demo-original')];
-      saveBrowserFiles(files);
-      renderFileHistory(files);
-      openPlanDetail(importId);
-      await loadChanges();
-      if (changes) {
-        openChanges(importId);
-        showToast('File booking có thay đổi so với bản trước, hãy kiểm tra.', 'info');
-      } else {
-        showToast(`Đã đọc ${formatNumber.format(summary.rowCount)} dòng. Bản preview Sites không lưu SQLite.`, 'info');
-      }
-      return;
-    }
-    let response;
-    try {
-      response = await fetch('/api/imports', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: file.name, rows })
-      });
-    } catch {
-      // Server unreachable: still show the workbook, but nothing is saved.
-      renderDashboard({ source: 'browser', importId: `browser-${Date.now()}`, filename: file.name, ...summary });
-      openPlanView();
-      showToast(`Đã đọc ${formatNumber.format(summary.rowCount)} dòng nhưng không kết nối được SQLite, dữ liệu chưa được lưu.`, 'info');
-      return;
-    }
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || 'Không thể lưu dữ liệu vào SQLite.');
-    renderDashboard(payload);
-    await loadFileHistory();
-    openPlanDetail(payload.importId);
-    await loadChanges();
-    if (payload.changes) {
-      openChanges(payload.importId);
-      showToast('File booking có thay đổi so với bản trước, hãy kiểm tra.', 'info');
-    } else {
-      showToast(`Đã nhập ${formatNumber.format(payload.rowCount)} dòng vào SQLite.`);
-    }
-  } catch (error) {
-    showToast(error.message, 'error');
-  } finally {
-    button.disabled = false;
-    button.innerHTML = '<i class="ph ph-upload-simple"></i>Nhập file booking';
-    event.target.value = '';
+  const importId = await withBusyButton(document.querySelector('#importButton'), 'Đang xử lý', async () => importBooking(await file.arrayBuffer(), file.name));
+  event.target.value = '';
+  if (importId) openPlanDetail(importId);
+});
+
+const sourcesPanel = document.querySelector('.sources-panel');
+sourcesPanel.addEventListener('click', (event) => {
+  const pick = event.target.closest('[data-pick-file]');
+  if (pick) sourcesPanel.querySelector(`[data-file-input="${pick.dataset.pickFile}"]`).click();
+  const toggle = event.target.closest('[data-toggle-link]');
+  if (toggle) {
+    const form = sourcesPanel.querySelector(`[data-link-form="${toggle.dataset.toggleLink}"]`);
+    form.hidden = !form.hidden;
+    if (!form.hidden) form.elements.url.focus();
   }
+});
+sourcesPanel.addEventListener('change', async (event) => {
+  const kind = event.target.dataset.fileInput;
+  const file = event.target.files?.[0];
+  if (!kind || !file) return;
+  const button = sourcesPanel.querySelector(`[data-pick-file="${kind}"]`);
+  await withBusyButton(button, 'Đang đọc', async () => importSource(kind, await file.arrayBuffer(), file.name));
+  event.target.value = '';
+});
+sourcesPanel.addEventListener('submit', async (event) => {
+  const kind = event.target.dataset.linkForm;
+  if (!kind) return;
+  event.preventDefault();
+  const url = event.target.elements.url.value;
+  const button = event.submitter || event.target.querySelector('[type="submit"]');
+  await withBusyButton(button, 'Đang tải', async () => {
+    const { buffer, filename } = await downloadFromLink(url, { viaServer: !isStaticPages });
+    await importSource(kind, buffer, filename, url);
+    event.target.reset();
+    event.target.hidden = true;
+  });
+});
+document.querySelectorAll('[data-batch-select]').forEach((select) => select.addEventListener('change', () => {
+  batchKey = select.value;
+  writeJson('planner-batch', batchKey);
+  expandedModelKey = null;
+  modelLimit = PAGE_SIZE;
+  renderWarehouse();
+}));
+document.querySelectorAll('[data-export]').forEach((button) => button.addEventListener('click', () => withBusyButton(button, 'Đang xuất', exportSummary)));
+document.querySelector('#overviewWarnings').addEventListener('click', (event) => {
+  const chip = event.target.closest('[data-goto-status]');
+  if (!chip) return;
+  modelFilters.status = chip.dataset.gotoStatus;
+  modelFilters.customer = '';
+  document.querySelectorAll('.nav__item').forEach((item) => item.classList.toggle('nav__item--active', item.dataset.page === 'Mã hàng'));
+  showPage('Mã hàng');
 });
 
 document.querySelectorAll('.nav__item').forEach((item) => item.addEventListener('click', () => {
@@ -959,48 +1054,6 @@ document.querySelector('#runAiCheck').addEventListener('click', async () => {
   button.disabled = false;
 });
 
-document.querySelector('#settingsShortcut').addEventListener('click', openSettings);
-document.querySelectorAll('[data-close-settings]').forEach((button) => button.addEventListener('click', closeSettings));
-document.querySelector('#settingsForm').addEventListener('input', renderCalculationPreview);
-document.querySelector('#settingsForm').addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const settings = settingsFromForm();
-  const submit = event.submitter;
-  submit.disabled = true;
-  try {
-    await persistSettings(settings);
-    closeSettings();
-    showToast('Đã lưu định mức và tính lại số máy.');
-  } catch (error) {
-    showToast(error.message, 'error');
-  } finally {
-    submit.disabled = false;
-  }
-});
-
-document.querySelector('#importWarehouse').addEventListener('click', () => document.querySelector('#warehouseFileInput').click());
-document.querySelector('#warehouseFileInput').addEventListener('change', async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  const button = document.querySelector('#importWarehouse');
-  button.disabled = true;
-  button.innerHTML = '<i class="ph ph-spinner-gap spin"></i>Đang đọc file kho';
-  try {
-    const lines = readWarehouseWorkbook(await file.arrayBuffer());
-    if (!lines.length) throw new Error('Sheet TỔNG HỢP không có dòng mã hàng nào.');
-    await saveWarehouse({ filename: file.name, importedAt: new Date().toISOString(), lines });
-    expandedModelKey = null;
-    modelLimit = PAGE_SIZE;
-    renderWarehouse();
-    showToast(`Đã đọc ${formatNumber.format(lines.length)} dòng PO từ file kho.`);
-  } catch (error) {
-    showToast(error.message, 'error');
-  } finally {
-    button.disabled = false;
-    button.innerHTML = '<i class="ph ph-warehouse"></i>Nhập file kho';
-    event.target.value = '';
-  }
-});
 document.querySelector('#modelSearch').addEventListener('input', (event) => {
   modelFilters.query = event.target.value;
   modelLimit = PAGE_SIZE;
@@ -1063,11 +1116,14 @@ document.querySelector('#markReviewed').addEventListener('click', async (event) 
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
   closeChanges();
-  closeSettings();
 });
 
 renderFileHistory();
-loadDashboard();
 loadSettings();
-loadFileHistory();
-loadChanges();
+// Browser mode reads the booking history before it can pick the newest booking.
+(async () => {
+  await loadFileHistory();
+  await loadSources();
+  await loadDashboard();
+  await loadChanges();
+})();
