@@ -27,7 +27,7 @@ Mở `http://localhost:4173` trong trình duyệt.
 4. **Tuần booking**: booking luôn được theo dõi theo từng tuần (ngày PXC CHUYỂN, Thứ Hai–Chủ Nhật), mặc định là tuần hiện tại. Số lượng là phần phân bổ vào các ngày trong tuần; nhận/đã in của mỗi dòng được rót FIFO tiếp xuống từng ngày, nên tuần chỉ nhận phần của mình.
 5. **Kiểm tra file**: sau khi nhập, nút **Kiểm tra file** mở bảng tổng hợp dữ liệu chuẩn bị xuất của tuần đã chọn — nguồn file, số dòng / lô / số lượng tuần, nhận, đã in, còn thiếu, cách nối (phiếu / FIFO), các điểm cần lưu ý và xem trước các dòng. Bấm **Xuất file** trong bảng này để tải một sheet `TH` giống file booking, chỉ gồm các dòng và các ngày của tuần; sau các cột ngày là Model, Màu, SL trong tuần, Nhận BTP, Đã in (giao), Còn thiếu và các cột của lô.
 
-Nhập bằng link: khi chạy `npm run dev`, máy chủ tải file từ link (SharePoint/OneDrive tự thêm `download=1`, Google Sheets tự xuất `.xlsx`). Link SharePoint nội bộ cần đăng nhập nên không tải được: đặt quyền chia sẻ “Bất kỳ ai có link” hoặc tải file về rồi chọn file. Bản Sites chỉ đọc được link cho phép tải chéo (CORS).
+Nhập bằng link: khi chạy `npm run dev`, máy chủ tải file từ link (SharePoint/OneDrive tự thêm `download=1` và giữ cookie khách của link “Bất kỳ ai có link”; Google Sheets tự xuất `.xlsx`). File nhận/giao nạp từ link được **cập nhật lại từ link** khi bấm nút, khi mở trang và mỗi 30 phút khi trang đang mở, vì bên giao nhận sửa file SharePoint liên tục. Link chỉ dành cho người trong tổ chức thì không tải được. Bản Sites chỉ đọc được link cho phép tải chéo (CORS), nên không tự cập nhật từ SharePoint.
 
 ## Theo mã hàng
 

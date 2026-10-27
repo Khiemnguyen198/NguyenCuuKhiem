@@ -451,10 +451,14 @@ const modelFilters = { customer: '', status: 'open', query: '', columns: { model
 let expandedModelKey = null;
 let modelLimit = PAGE_SIZE;
 
-function sourceMeta(source, detail) {
+function sourceMeta(source, detail, kind = null) {
   if (!source?.filename) return '<span class="muted">Chưa có dữ liệu</span>';
+  const fromLink = Boolean(source.origin) && kind && !isStaticPages;
   const origin = source.origin ? ' · từ link' : '';
-  return `<strong title="${escapeHtml(source.filename)}">${escapeHtml(source.filename)}</strong><span>${escapeHtml(formatFileDate(source.importedAt))}${origin} · ${detail}</span>`;
+  const refresh = fromLink
+    ? `<button type="button" class="link-refresh" data-refresh-source="${kind}" title="${escapeHtml(source.origin)}"><i class="ph ph-arrows-clockwise"></i>Cập nhật từ link</button><small>Tự cập nhật mỗi ${AUTO_REFRESH_MINUTES} phút khi trang đang mở</small>`
+    : '';
+  return `<strong title="${escapeHtml(source.filename)}">${escapeHtml(source.filename)}</strong><span>${escapeHtml(formatFileDate(source.importedAt))}${origin} · ${detail}</span>${refresh}`;
 }
 
 function renderSources() {
@@ -463,8 +467,8 @@ function renderSources() {
     ? sourceMeta({ filename: booking.filename, importedAt: booking.importedAt || booking.createdAt }, `${formatNumber.format(booking.rowCount)} dòng · ${formatNumber.format(lotSummary ? lotSummary.items.filter((item) => !item.outsideBooking).length : 0)} lô`)
     : '<span class="muted">Đang hiện dữ liệu mẫu</span>';
   const receiptCount = sourceState.receipts.lines.reduce((sum, line) => sum + (line.receipts ?? 1), 0);
-  document.querySelector('#sourceMeta-receipts').innerHTML = sourceMeta(sourceState.receipts, `${formatNumber.format(receiptCount)} lần nhận`);
-  document.querySelector('#sourceMeta-deliveries').innerHTML = sourceMeta(sourceState.deliveries, `${formatNumber.format(sourceState.deliveries.lines.length)} dòng PO`);
+  document.querySelector('#sourceMeta-receipts').innerHTML = sourceMeta(sourceState.receipts, `${formatNumber.format(receiptCount)} lần nhận`, 'receipts');
+  document.querySelector('#sourceMeta-deliveries').innerHTML = sourceMeta(sourceState.deliveries, `${formatNumber.format(sourceState.deliveries.lines.length)} dòng PO`, 'deliveries');
 }
 
 function renderWarehouse() {
@@ -663,6 +667,34 @@ async function importSource(kind, buffer, filename, origin = null) {
     ? `Đã đọc ${formatNumber.format(lines.length)} lần nhận BTP.`
     : `Đã đọc ${formatNumber.format(lines.length)} dòng PO từ file giao.`);
   return null;
+}
+
+// The receiving and delivery files live on SharePoint and are edited all day; a source added
+// from a link is downloaded again on demand, on page load and every AUTO_REFRESH_MINUTES.
+const AUTO_REFRESH_MINUTES = 30;
+const refreshing = new Set();
+
+async function refreshSource(kind, { quiet = false } = {}) {
+  const { origin } = sourceState[kind];
+  if (!origin || isStaticPages || refreshing.has(kind)) return;
+  refreshing.add(kind);
+  try {
+    const { buffer, filename } = await downloadFromLink(origin, { viaServer: true });
+    await importSource(kind, buffer, filename, origin);
+  } catch (error) {
+    if (!quiet) throw error;
+    console.warn(`Không tự cập nhật được ${kind} từ link:`, error);
+  } finally {
+    refreshing.delete(kind);
+  }
+}
+
+async function refreshStaleSources() {
+  for (const kind of Object.keys(sourceState)) {
+    const { origin, importedAt } = sourceState[kind];
+    const age = Date.now() - Date.parse(importedAt || 0);
+    if (origin && !(age < AUTO_REFRESH_MINUTES * 60_000)) await refreshSource(kind, { quiet: true });
+  }
 }
 
 async function loadLatestAiReport() {
@@ -957,6 +989,8 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
 
 const sourcesPanel = document.querySelector('.sources-panel');
 sourcesPanel.addEventListener('click', (event) => {
+  const refresh = event.target.closest('[data-refresh-source]');
+  if (refresh) withBusyButton(refresh, 'Đang tải', () => refreshSource(refresh.dataset.refreshSource));
   const pick = event.target.closest('[data-pick-file]');
   if (pick) sourcesPanel.querySelector(`[data-file-input="${pick.dataset.pickFile}"]`).click();
   const toggle = event.target.closest('[data-toggle-link]');
@@ -1212,6 +1246,10 @@ loadSettings();
 (async () => {
   await loadFileHistory();
   await loadSources();
+  if (!isStaticPages) {
+    refreshStaleSources();
+    setInterval(refreshStaleSources, AUTO_REFRESH_MINUTES * 60_000);
+  }
   await loadDashboard();
   await loadChanges();
 })();

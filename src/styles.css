@@ -169,6 +169,9 @@ button.metric { border-top: 0; border-bottom: 0; border-left: 0; text-align: lef
 .source-card__meta { min-height: 38px; display: grid; gap: 3px; font-size: 11px; }
 .source-card__meta strong { overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; }
 .source-card__meta span { color: var(--muted); }
+.link-refresh { justify-self: start; margin-top: 4px; display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; border: 1px solid #cbd8e2; border-radius: 6px; background: #fff; color: #1d5f99; font-size: 11px; font-weight: 700; }
+.link-refresh:disabled { color: var(--muted); }
+.source-card__meta small { color: var(--muted); font-size: 10px; }
 .source-card__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .source-card__actions button { padding: 9px 13px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
 .source-card__link { display: flex; gap: 8px; }
