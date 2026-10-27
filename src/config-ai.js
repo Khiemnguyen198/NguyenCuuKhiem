@@ -10,6 +10,28 @@ const fieldAliases = {
   note: ['ghi chu', 'ghi chú', 'note', 'notes', 'mo ta', 'mô tả']
 };
 
+export const MACHINE_SUGGESTIONS = [
+  'OVAL18 mới',
+  'OVAL18 cũ',
+  'OVAL24',
+  'OVAL28',
+  'OVAL16',
+  'Máy Tự Động 1',
+  'Máy Tự Động 2',
+  'Máy Tự Động 3',
+  'Máy Tự Động 4',
+  'Máy Tự Động 5',
+  'Máy in K3 1',
+  'Máy in K3 2',
+  'Máy in K3 3',
+  'Máy in K3 4',
+  'SẤY',
+  'ÉP',
+  'In BÀN 1',
+  'In BÀN 2',
+  'THÊU'
+];
+
 function normalizeLabel(value) {
   return String(value ?? '')
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')

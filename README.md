@@ -50,6 +50,7 @@ Máy cần = làm tròn lên(Tổng phút / Công suất mỗi máy)
 ### Danh mục cấu hình định mức
 
 - Có thể nhập file Excel hoặc tạo từng định mức thủ công.
+- Khi nhập thủ công, ứng dụng gợi ý 19 máy/công đoạn hiện có tại nhà máy: nhóm OVAL, máy Tự Động, máy in K3, SẤY, ÉP, in BÀN và THÊU.
 - AI local tự nhận diện các cột tên/mã kiểu, số phút, số máy, số ca, phút mỗi ca, hiệu suất và số ngày kế hoạch.
 - File cấu hình nhập vào được lưu thành danh mục mặc định; định mức đầu tiên được áp dụng cho phép tính kế hoạch.
 - Chọn một mục như **Oval 18** để xem toàn bộ thông tin.

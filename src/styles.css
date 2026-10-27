@@ -142,6 +142,13 @@ button.metric { border-top: 0; border-bottom: 0; border-left: 0; text-align: lef
 #standardFields { margin: 0; padding: 22px 24px; border: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 17px 20px; }
 #standardFields label { display: grid; gap: 7px; color: #274560; font-size: 11px; font-weight: 700; }
 #standardFields .field-wide { grid-column: 1 / -1; }
+.standard-name-field { display: grid; gap: 10px; }
+.machine-suggestions[hidden] { display: none; }
+.machine-suggestions { padding: 11px 12px; display: grid; gap: 8px; border: 1px solid #d9e7e1; border-radius: 7px; background: #f4faf8; }
+.machine-suggestions > span { color: #527265; font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.machine-suggestions > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.machine-suggestions button { padding: 6px 9px; border: 1px solid #c4ddd4; border-radius: 14px; color: #17664f; background: #fff; font-size: 9px; font-weight: 700; }
+.machine-suggestions button:hover { border-color: #20a77d; color: #08785b; background: #e7f7f1; }
 #standardFields input, #standardFields textarea { width: 100%; border: 1px solid #cbd8e2; border-radius: 6px; padding: 10px 12px; color: var(--ink); background: #fbfdfe; outline: none; resize: vertical; }
 #standardFields input:focus, #standardFields textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgb(17 167 122 / 12%); background: #fff; }
 #standardFields:disabled input, #standardFields:disabled textarea { color: #546b7f; background: #f1f5f7; }

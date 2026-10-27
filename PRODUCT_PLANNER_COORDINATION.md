@@ -34,6 +34,7 @@ Always pull `master` before editing. Do not treat the GPT Sites deployment as th
 - Two-level planning flow: the Kế hoạch section lists imported plan files first, then opens the selected import's scheduling dashboard.
 - Lightweight local AI checker for missing or invalid values, date order, duplicate rows, unsupported lead times, and quantity outliers; SQLite stores one report per import.
 - Production-standard catalog with AI-assisted Excel column mapping, manual entry, default-plan selection, and confirmation-gated editing; SQLite persists locked standards.
+- Manual standard entry provides the user-confirmed catalog of 19 factory machines/processes as quick-select suggestions while still allowing new names.
 - Production builds use browser storage for capacity settings and browser-only workbook import on static hosting, including GPT Sites at the root URL.
 
 ## Current limitations

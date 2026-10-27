@@ -2,7 +2,7 @@ import '@phosphor-icons/web/regular';
 import * as XLSX from 'xlsx';
 import './styles.css';
 import { analyzeBookingRows } from './local-ai.js';
-import { normalizeStandardRows } from './config-ai.js';
+import { MACHINE_SUGGESTIONS, normalizeStandardRows } from './config-ai.js';
 
 const formatNumber = new Intl.NumberFormat('vi-VN');
 const isStaticPages = import.meta.env.PROD || import.meta.env.BASE_URL !== '/';
@@ -178,7 +178,11 @@ document.querySelector('#app').innerHTML = `
                 <span class="lock-state" id="standardLockState"><i class="ph ph-lock-key"></i>Đang khóa</span>
               </header>
               <fieldset id="standardFields" disabled>
-                <label class="field-wide"><span>Tên định mức / mã kiểu</span><input name="name" required placeholder="Ví dụ: Oval 18" /></label>
+                <div class="field-wide standard-name-field">
+                  <label><span>Tên máy / định mức</span><input name="name" list="machineSuggestions" required placeholder="Chọn máy hoặc nhập tên mới" /></label>
+                  <datalist id="machineSuggestions">${MACHINE_SUGGESTIONS.map((machine) => `<option value="${machine}"></option>`).join('')}</datalist>
+                  <div class="machine-suggestions" id="machineSuggestionPanel" hidden><span>Máy có tại nhà máy</span><div>${MACHINE_SUGGESTIONS.map((machine) => `<button type="button" data-machine-name="${machine}">${machine}</button>`).join('')}</div></div>
+                </div>
                 <label><span>Phút / lượt hình</span><input name="minutesPerImpression" type="number" min="0.0001" step="0.0001" required /></label>
                 <label><span>Phút setup / PO</span><input name="setupMinutesPerPo" type="number" min="0" step="0.1" /></label>
                 <label><span>Số máy</span><input name="machineCount" type="number" min="1" step="1" /></label>
@@ -493,6 +497,7 @@ function setStandardEditable(editable) {
   document.querySelector('#standardFields').disabled = !editable;
   document.querySelector('#unlockStandard').hidden = editable;
   document.querySelector('#saveStandard').hidden = !editable;
+  document.querySelector('#machineSuggestionPanel').hidden = !editable;
   const lock = document.querySelector('#standardLockState');
   lock.innerHTML = editable ? '<i class="ph ph-lock-key-open"></i>Đang chỉnh sửa' : '<i class="ph ph-lock-key"></i>Đang khóa';
   lock.dataset.unlocked = editable ? 'true' : 'false';
@@ -924,6 +929,14 @@ document.querySelector('#standardList').addEventListener('click', (event) => {
   if (row) selectStandard(row.dataset.standardId);
 });
 document.querySelector('#standardSearch').addEventListener('input', (event) => renderStandardList(event.target.value));
+document.querySelector('#machineSuggestionPanel').addEventListener('click', (event) => {
+  const suggestion = event.target.closest('[data-machine-name]');
+  if (!suggestion) return;
+  const form = document.querySelector('#standardForm');
+  form.elements.name.value = suggestion.dataset.machineName;
+  document.querySelector('#standardTitle').textContent = suggestion.dataset.machineName;
+  form.elements.minutesPerImpression.focus();
+});
 document.querySelector('#addStandard').addEventListener('click', () => {
   const draft = {
     id: `draft-${Date.now()}`, name: '', minutesPerImpression: null,
