@@ -10,8 +10,22 @@ const fallbackDashboard = {
   filename: '45.DECATHLON - KẾ HOẠCH BOOK IN CẬP NHẬT NGÀY 26102026.xlsx',
   rowCount: 2503,
   totalQuantity: 1768485,
-  totalImpressions: 2953041
+  totalImpressions: 2953041,
+  uniquePo: 2410
 };
+
+const defaultSettings = {
+  minutesPerImpression: null,
+  setupMinutesPerPo: 0,
+  machineCount: null,
+  shiftsPerDay: 1,
+  minutesPerShift: 480,
+  efficiencyPercent: 85,
+  planningDays: 6
+};
+
+let dashboardState = fallbackDashboard;
+let settingsState = { ...defaultSettings };
 
 const schedule = [
   {
@@ -103,7 +117,7 @@ document.querySelector('#app').innerHTML = `
             <div class="metric"><strong id="rowCount">—</strong><span>dòng booking</span></div>
             <div class="metric"><strong id="totalQuantity">—</strong><span>sản phẩm</span></div>
             <div class="metric"><strong id="totalImpressions">—</strong><span>lượt hình</span></div>
-            <div class="metric metric--pending"><strong>—</strong><span>Máy cần <i class="ph ph-info"></i></span><small>Chờ cấu hình định mức thời gian</small></div>
+            <button class="metric metric--pending" id="settingsShortcut"><strong id="machinesRequired">—</strong><span id="machineMetricLabel">Máy cần <i class="ph ph-info"></i></span><small id="machineMetricMeta">Chờ cấu hình định mức thời gian</small></button>
           </section>
 
           <section class="capacity-panel">
@@ -135,6 +149,31 @@ document.querySelector('#app').innerHTML = `
         </aside>
       </div>
     </main>
+  </div>
+  <div class="modal" id="settingsModal" aria-hidden="true">
+    <button class="modal__backdrop" data-close-settings aria-label="Đóng cấu hình"></button>
+    <section class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <header class="settings-dialog__header">
+        <div><p class="section-heading__overline">ĐỊNH MỨC SẢN XUẤT</p><h2 id="settingsTitle">Tính phút và số máy</h2></div>
+        <button class="icon-button" data-close-settings aria-label="Đóng"><i class="ph ph-x"></i></button>
+      </header>
+      <form id="settingsForm">
+        <div class="settings-grid">
+          <label><span>Phút / lượt hình</span><input name="minutesPerImpression" type="number" min="0.0001" step="0.0001" required placeholder="Ví dụ: 0,25" /><small>Định mức thời gian cho một lượt hình in.</small></label>
+          <label><span>Phút setup / PO</span><input name="setupMinutesPerPo" type="number" min="0" step="0.1" required /></label>
+          <label><span>Số máy hiện có</span><input name="machineCount" type="number" min="1" step="1" required /></label>
+          <label><span>Số ca / ngày</span><input name="shiftsPerDay" type="number" min="1" step="1" required /></label>
+          <label><span>Phút / ca</span><input name="minutesPerShift" type="number" min="1" step="1" required /></label>
+          <label><span>Hiệu suất máy (%)</span><input name="efficiencyPercent" type="number" min="1" max="100" step="0.1" required /></label>
+          <label><span>Số ngày kế hoạch</span><input name="planningDays" type="number" min="1" step="1" required /><small>Tính từ Thứ Hai đến Thứ Bảy; Chủ Nhật nghỉ.</small></label>
+        </div>
+        <div class="calculation-preview" id="calculationPreview"></div>
+        <footer class="settings-dialog__footer">
+          <button type="button" class="secondary-button" data-close-settings>Hủy</button>
+          <button type="submit" class="primary-button"><i class="ph ph-floppy-disk"></i>Lưu & tính lại</button>
+        </footer>
+      </form>
+    </section>
   </div>
   <div class="toast" id="toast" role="status"></div>
 `;
@@ -212,11 +251,100 @@ function extractBookingRows(workbook) {
 }
 
 function renderDashboard(data) {
+  dashboardState = { ...fallbackDashboard, ...data };
   document.querySelector('#filename').textContent = data.filename;
-  document.querySelector('#fileMeta').textContent = `${data.source === 'sqlite' ? 'Đã lưu SQLite' : 'Dữ liệu mẫu'} • ${formatNumber.format(data.rowCount)} dòng`;
+  const sourceLabel = data.source === 'sqlite' ? 'Đã lưu SQLite' : data.source === 'browser' ? 'Đã đọc trong trình duyệt' : 'Dữ liệu mẫu';
+  document.querySelector('#fileMeta').textContent = `${sourceLabel} • ${formatNumber.format(data.rowCount)} dòng`;
   document.querySelector('#rowCount').textContent = formatNumber.format(data.rowCount);
   document.querySelector('#totalQuantity').textContent = formatNumber.format(data.totalQuantity);
   document.querySelector('#totalImpressions').textContent = formatNumber.format(data.totalImpressions);
+  renderMachineCalculation();
+}
+
+function calculateCapacity(data, settings) {
+  const minutesPerImpression = Number(settings.minutesPerImpression);
+  const machineCount = Number(settings.machineCount);
+  if (!minutesPerImpression || !machineCount) return null;
+  const requiredMinutes = data.totalImpressions * minutesPerImpression + data.uniquePo * Number(settings.setupMinutesPerPo || 0);
+  const capacityPerMachine = Number(settings.shiftsPerDay) * Number(settings.minutesPerShift) * (Number(settings.efficiencyPercent) / 100) * Number(settings.planningDays);
+  if (capacityPerMachine <= 0) return null;
+  const machinesRequired = Math.ceil(requiredMinutes / capacityPerMachine);
+  return { requiredMinutes, capacityPerMachine, machinesRequired, gap: machineCount - machinesRequired };
+}
+
+function renderMachineCalculation() {
+  const calculation = calculateCapacity(dashboardState, settingsState);
+  const metric = document.querySelector('#settingsShortcut');
+  if (!calculation) {
+    document.querySelector('#machinesRequired').textContent = '—';
+    document.querySelector('#machineMetricLabel').innerHTML = 'Máy cần <i class="ph ph-info"></i>';
+    document.querySelector('#machineMetricMeta').textContent = 'Chờ cấu hình định mức thời gian';
+    metric.dataset.state = 'pending';
+    return;
+  }
+  document.querySelector('#machinesRequired').textContent = formatNumber.format(calculation.machinesRequired);
+  document.querySelector('#machineMetricLabel').textContent = `Máy cần / ${settingsState.planningDays} ngày`;
+  document.querySelector('#machineMetricMeta').textContent = calculation.gap >= 0
+    ? `Đủ công suất • dư ${formatNumber.format(calculation.gap)} máy`
+    : `Thiếu ${formatNumber.format(Math.abs(calculation.gap))} máy`;
+  metric.dataset.state = calculation.gap >= 0 ? 'ok' : 'danger';
+}
+
+function fillSettingsForm(settings = settingsState) {
+  const form = document.querySelector('#settingsForm');
+  Object.entries(settings).forEach(([name, value]) => {
+    if (form.elements[name]) form.elements[name].value = value ?? '';
+  });
+  renderCalculationPreview();
+}
+
+function settingsFromForm() {
+  const form = document.querySelector('#settingsForm');
+  return Object.fromEntries([...new FormData(form)].map(([key, value]) => [key, Number(value)]));
+}
+
+function renderCalculationPreview() {
+  const preview = document.querySelector('#calculationPreview');
+  const calculation = calculateCapacity(dashboardState, settingsFromForm());
+  if (!calculation) {
+    preview.innerHTML = '<i class="ph ph-calculator"></i><span>Nhập phút/lượt hình và số máy để xem kết quả.</span>';
+    return;
+  }
+  preview.innerHTML = `
+    <div><span>Tổng phút cần</span><strong>${formatNumber.format(Math.round(calculation.requiredMinutes))}</strong></div>
+    <div><span>Công suất / máy</span><strong>${formatNumber.format(Math.round(calculation.capacityPerMachine))} phút</strong></div>
+    <div><span>Máy cần</span><strong>${formatNumber.format(calculation.machinesRequired)}</strong></div>
+  `;
+}
+
+function openSettings() {
+  fillSettingsForm();
+  const modal = document.querySelector('#settingsModal');
+  modal.classList.add('modal--open');
+  modal.setAttribute('aria-hidden', 'false');
+  modal.querySelector('input')?.focus();
+}
+
+function closeSettings() {
+  const modal = document.querySelector('#settingsModal');
+  modal.classList.remove('modal--open');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+async function loadSettings() {
+  if (isStaticPages) {
+    try { settingsState = { ...defaultSettings, ...JSON.parse(localStorage.getItem('planner-settings')) }; } catch { settingsState = { ...defaultSettings }; }
+    renderMachineCalculation();
+    return;
+  }
+  try {
+    const response = await fetch('/api/settings');
+    if (!response.ok) throw new Error();
+    settingsState = { ...defaultSettings, ...await response.json() };
+    renderMachineCalculation();
+  } catch {
+    settingsState = { ...defaultSettings };
+  }
 }
 
 let toastTimer;
@@ -258,7 +386,8 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
       filename: file.name,
       rowCount: rows.length,
       totalQuantity: rows.reduce((sum, row) => sum + row.lineQuantity, 0),
-      totalImpressions: rows.reduce((sum, row) => sum + row.lineQuantity * row.printCount, 0)
+      totalImpressions: rows.reduce((sum, row) => sum + row.lineQuantity * row.printCount, 0),
+      uniquePo: new Set(rows.map((row) => row.po)).size
     };
     if (isStaticPages) {
       renderDashboard(localPayload);
@@ -294,8 +423,39 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
 document.querySelectorAll('.nav__item').forEach((item) => item.addEventListener('click', () => {
   document.querySelectorAll('.nav__item').forEach((navItem) => navItem.classList.remove('nav__item--active'));
   item.classList.add('nav__item--active');
-  if (item.dataset.page !== 'Kế hoạch') showToast(`${item.dataset.page} đang được hoàn thiện trong bản test.`, 'info');
+  if (item.dataset.page === 'Cấu hình') openSettings();
+  else if (item.dataset.page !== 'Kế hoạch') showToast(`${item.dataset.page} đang được hoàn thiện trong bản test.`, 'info');
 }));
+
+document.querySelector('#settingsShortcut').addEventListener('click', openSettings);
+document.querySelectorAll('[data-close-settings]').forEach((button) => button.addEventListener('click', closeSettings));
+document.querySelector('#settingsForm').addEventListener('input', renderCalculationPreview);
+document.querySelector('#settingsForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const settings = settingsFromForm();
+  const submit = event.submitter;
+  submit.disabled = true;
+  try {
+    if (isStaticPages) {
+      localStorage.setItem('planner-settings', JSON.stringify(settings));
+      settingsState = settings;
+    } else {
+      const response = await fetch('/api/settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings)
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Không thể lưu cấu hình.');
+      settingsState = payload;
+    }
+    renderMachineCalculation();
+    closeSettings();
+    showToast('Đã lưu định mức và tính lại số máy.');
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    submit.disabled = false;
+  }
+});
 
 document.querySelectorAll('.issue').forEach((issue) => issue.addEventListener('click', () => {
   document.querySelectorAll('.issue').forEach((item) => item.classList.remove('issue--selected'));
@@ -304,3 +464,4 @@ document.querySelectorAll('.issue').forEach((issue) => issue.addEventListener('c
 
 renderSchedule();
 loadDashboard();
+loadSettings();

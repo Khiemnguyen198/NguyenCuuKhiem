@@ -39,6 +39,18 @@ database.exec(`
   );
   CREATE INDEX IF NOT EXISTS booking_rows_import_id ON booking_rows(import_id);
   CREATE INDEX IF NOT EXISTS booking_rows_lead_time ON booking_rows(lead_time);
+  CREATE TABLE IF NOT EXISTS app_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    minutes_per_impression REAL,
+    setup_minutes_per_po REAL NOT NULL DEFAULT 0,
+    machine_count INTEGER,
+    shifts_per_day INTEGER NOT NULL DEFAULT 1,
+    minutes_per_shift INTEGER NOT NULL DEFAULT 480,
+    efficiency_percent REAL NOT NULL DEFAULT 85,
+    planning_days INTEGER NOT NULL DEFAULT 6,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  INSERT OR IGNORE INTO app_settings(id) VALUES (1);
 `);
 
 const demoDashboard = {
@@ -48,6 +60,7 @@ const demoDashboard = {
   rowCount: 2503,
   totalQuantity: 1768485,
   totalImpressions: 2953041,
+  uniquePo: 2410,
   leadTimes: [
     { label: '1 ngày', rows: 2149, quantity: 1633779 },
     { label: '2 ngày', rows: 184, quantity: 72658 },
@@ -82,6 +95,7 @@ function latestDashboard() {
     FROM booking_rows WHERE import_id = ? GROUP BY lead_time
     ORDER BY CASE lead_time WHEN '1 ngày' THEN 1 WHEN '2 ngày' THEN 2 WHEN '3 ngày' THEN 3 WHEN '5 ngày' THEN 5 ELSE 99 END
   `).all(latest.id);
+  const uniquePo = database.prepare('SELECT COUNT(DISTINCT po) AS count FROM booking_rows WHERE import_id = ?').get(latest.id).count;
   return {
     source: 'sqlite',
     filename: latest.filename,
@@ -89,7 +103,22 @@ function latestDashboard() {
     rowCount: latest.row_count,
     totalQuantity: latest.total_quantity,
     totalImpressions: latest.total_impressions,
+    uniquePo,
     leadTimes
+  };
+}
+
+function currentSettings() {
+  const row = database.prepare('SELECT * FROM app_settings WHERE id = 1').get();
+  return {
+    minutesPerImpression: row.minutes_per_impression,
+    setupMinutesPerPo: row.setup_minutes_per_po,
+    machineCount: row.machine_count,
+    shiftsPerDay: row.shifts_per_day,
+    minutesPerShift: row.minutes_per_shift,
+    efficiencyPercent: row.efficiency_percent,
+    planningDays: row.planning_days,
+    updatedAt: row.updated_at
   };
 }
 
@@ -100,6 +129,42 @@ function sqliteApi() {
       server.middlewares.use('/api/dashboard', (request, response) => {
         if (request.method !== 'GET') return sendJson(response, 405, { error: 'Method not allowed' });
         sendJson(response, 200, latestDashboard());
+      });
+
+      server.middlewares.use('/api/settings', async (request, response) => {
+        if (request.method === 'GET') return sendJson(response, 200, currentSettings());
+        if (request.method !== 'PUT') return sendJson(response, 405, { error: 'Method not allowed' });
+        try {
+          const payload = JSON.parse(await readBody(request));
+          const numbers = {
+            minutesPerImpression: Number(payload.minutesPerImpression),
+            setupMinutesPerPo: Number(payload.setupMinutesPerPo || 0),
+            machineCount: Number(payload.machineCount),
+            shiftsPerDay: Number(payload.shiftsPerDay),
+            minutesPerShift: Number(payload.minutesPerShift),
+            efficiencyPercent: Number(payload.efficiencyPercent),
+            planningDays: Number(payload.planningDays)
+          };
+          if (
+            numbers.minutesPerImpression <= 0 || numbers.setupMinutesPerPo < 0 || numbers.machineCount <= 0 ||
+            numbers.shiftsPerDay <= 0 || numbers.minutesPerShift <= 0 || numbers.efficiencyPercent <= 0 ||
+            numbers.efficiencyPercent > 100 || numbers.planningDays <= 0
+          ) return sendJson(response, 400, { error: 'Thông số cấu hình không hợp lệ.' });
+
+          database.prepare(`
+            UPDATE app_settings SET
+              minutes_per_impression = ?, setup_minutes_per_po = ?, machine_count = ?,
+              shifts_per_day = ?, minutes_per_shift = ?, efficiency_percent = ?, planning_days = ?,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = 1
+          `).run(
+            numbers.minutesPerImpression, numbers.setupMinutesPerPo, numbers.machineCount,
+            numbers.shiftsPerDay, numbers.minutesPerShift, numbers.efficiencyPercent, numbers.planningDays
+          );
+          return sendJson(response, 200, currentSettings());
+        } catch (error) {
+          return sendJson(response, 500, { error: error.message || 'Không thể lưu cấu hình.' });
+        }
       });
 
       server.middlewares.use('/api/imports', async (request, response) => {
