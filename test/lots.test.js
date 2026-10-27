@@ -88,3 +88,13 @@ test('pours a row into its planned days so a week only gets its own part', async
   const week = restrictToRows(items, (r) => batchRow(r, days, nextWeek));
   assert.deepEqual([week[0].contract, week[0].received, week[0].delivered, week[0].good, week[0].remaining], [200, 150, 80, 50, 150]);
 });
+
+test('a lot matched by ticket in the receiving file still gets FIFO deliveries', () => {
+  const bookingRows = [row('PO1', 100, '2026-11-05', { ticketNumber: '73576' }), row('PO2', 100, '2026-11-08', { line: '78' })];
+  const receiptLines = [{ model: '353234', color: 'PAT29784', season: 'SS27', po: '73576', received: 90, shipped: 0, date: '2026-10-26' }];
+  const deliveryLines = [delivery({ received: 150, delivered: 150, good: 150 })];
+  const { items } = summarizeLots({ bookingRows, deliveryLines, receiptLines });
+  const lot = (po) => items.find((item) => item.rows.some((r) => r.po === po));
+  assert.deepEqual([lot('PO1').received, lot('PO1').delivered, lot('PO1').matchedBy], [90, 100, 'phiếu + FIFO']);
+  assert.deepEqual([lot('PO2').received, lot('PO2').delivered], [0, 50]);
+});

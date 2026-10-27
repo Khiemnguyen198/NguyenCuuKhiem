@@ -137,7 +137,7 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
   for (const lot of lots) {
     const key = `${lot.product}|${up(lot.season)}`;
     lotsByProductSeason.set(key, [...(lotsByProductSeason.get(key) || []), lot]);
-    Object.assign(lot, ZERO(), { prints: [], matched: new Set(), pos: new Set(lot.rows.map((row) => row.po)) });
+    Object.assign(lot, ZERO(), { prints: [], matched: new Set(), ticketFields: new Set(), pos: new Set(lot.rows.map((row) => row.po)) });
   }
 
   // Warehouse units: one per product + season + ticket, reduced to the slowest print.
@@ -154,6 +154,8 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
       add(direct, unit);
       direct.prints.push(...unit.prints);
       direct.matched.add('phiếu');
+      direct.ticketFields.add('delivered');
+      if (!receiptLines.length) direct.ticketFields.add('received');
       continue;
     }
     const season = resolveSeason(unit.product, unit.season);
@@ -191,23 +193,30 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
       target.good += unit.shipped;
     }
     if (unit.lastDate && (!target.lastReceiptDate || unit.lastDate > target.lastReceiptDate)) target.lastReceiptDate = unit.lastDate;
-    if (direct) direct.matched.add('phiếu');
+    if (direct) {
+      direct.matched.add('phiếu');
+      direct.ticketFields.add('received');
+      if (!deliveryLines.length) direct.ticketFields.add('delivered');
+    }
   }
 
   // FIFO: each product's pool fills its lots in due-date order, up to the lot's contract.
   for (const [key, pool] of pools) {
-    // Lots already matched by ticket keep their own figures; untracked goods go to the others.
     const targets = (lotsByProductSeason.get(key) || [])
-      .filter((lot) => !lot.matched.has('phiếu'))
+      .slice()
       .sort((a, b) => String(a.firstDue || '9').localeCompare(String(b.firstDue || '9')));
     if (!targets.length) continue;
+    // A lot matched by ticket in one file keeps that file's figure; goods without a ticket
+    // go to the lots that file did not match. Good follows delivered.
     const fill = (field) => {
+      const source = field === 'good' ? 'delivered' : field;
       const room = (lot) => Math.max(0, lot.contract - lot[field]);
       let left = pool[field];
-      for (const lot of targets) {
+      for (const lot of targets.filter((item) => !item.ticketFields.has(source))) {
         const share = Math.min(left, room(lot));
         lot[field] += share;
         left -= share;
+        if (share > 0) lot.matched.add('FIFO');
       }
       return left;
     };
@@ -218,7 +227,6 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
       for (const lot of targets) lot[field] += pool[field] * (lot.delivered / deliveredTotal);
     }
     for (const lot of targets) {
-      if (lot.received || lot.delivered) lot.matched.add('FIFO');
       if (pool.lastReceiptDate && (!lot.lastReceiptDate || pool.lastReceiptDate > lot.lastReceiptDate)) lot.lastReceiptDate = pool.lastReceiptDate;
     }
     targets.at(-1).overflow = overflow;
