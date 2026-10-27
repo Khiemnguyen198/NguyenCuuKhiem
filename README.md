@@ -20,18 +20,18 @@ Mở `http://localhost:4173` trong trình duyệt.
    - **Nhận**: file nhập BTP (sheet `DATA`, ví dụ `INKAVA_XUẤT NHẬP BTP NEW.xlsx`): số đã nhận và ngày nhận.
    - **Giao**: file kế toán kho (sheet `TỔNG HỢP`): tổng giao, hỏng in, lỗi vải, giao đạt.
 2. AI local kiểm tra booking; cảnh báo hiện ngay dưới các chỉ số.
-3. Ứng dụng nối 3 nguồn theo **mã hàng + màu** và tính cho từng mã: SL hợp đồng, đã nhận, đã in, giao đạt, lỗi, còn thiếu, hạn giao, trạng thái.
-4. **Đợt booking**: chọn một tuần (theo ngày PXC CHUYỂN, Thứ Hai–Chủ Nhật) để chỉ theo dõi các dòng phân bổ trong tuần đó; số lượng là phần phân bổ của đợt, hạn giao là ngày PXI TRẢ. Mặc định là tuần hiện tại. Số đã nhận / giao đạt vẫn là lũy kế theo mã hàng vì file nhận/giao không tách theo đợt.
-5. **Xuất file tổng hợp** tạo một workbook mở đầu bằng sheet `TH` giống hệt sheet TH của file booking (tiêu đề ở dòng 1 và 5, PXC CHUYỂN / PXI TRẢ / TỔNG TUẦN / TỔNG NGÀY ở dòng 1–4, dòng trống giữa các nhóm leadtime; TỔNG NGÀY/TỔNG TUẦN được tính lại đúng), cột tiến độ theo mã đặt sau các cột ngày; tiếp theo là `TỔNG QUAN`, `THEO MÃ HÀNG`, `THEO KHÁCH HÀNG`, `CẢNH BÁO`, `THAY ĐỔI BOOKING`. Khi đang chọn một đợt, file chỉ gồm đợt đó. Booking mới nhất được chuyển sang mục **File đã làm**.
+3. Ứng dụng gom booking thành **lô**: Mã hàng (REF) + Model (7 số đầu của COLOR) + Mùa, với **SLHĐ tổng** tính lại theo đúng công thức của file (cùng SỐ PHIẾU, hoặc cùng LINE + REF + COLOR + INPUT khi chưa có phiếu).
+   - Hàng nhận/giao có số phiếu khớp lô → gán thẳng cho lô đó.
+   - Phần còn lại của mỗi Mã + Model (+ Mùa) được rót **FIFO**: lô có hạn giao sớm nhất được lấp trước, rồi trong lô chia xuống từng dòng PO theo hạn giao.
+   - Hàng trong file nhận/giao không thuộc lô nào hiện ở bộ lọc **Ngoài booking**, không tính vào tổng.
+4. **Đợt booking**: chọn một tuần (theo ngày PXC CHUYỂN) để chỉ theo dõi các dòng phân bổ trong tuần đó; số nhận/giao của đợt là phần FIFO của chính các dòng đó.
+5. **Xuất file tổng hợp**: một sheet `TH` duy nhất, giống hệt sheet TH của file booking; sau các cột ngày là Nhận BTP, Đã in (giao), Còn thiếu của từng dòng và SLHĐ tổng, Lỗi, Trạng thái, Hạn còn, Nối bằng của lô.
 
 Nhập bằng link: khi chạy `npm run dev`, máy chủ tải file từ link (SharePoint/OneDrive tự thêm `download=1`, Google Sheets tự xuất `.xlsx`). Link SharePoint nội bộ cần đăng nhập nên không tải được: đặt quyền chia sẻ “Bất kỳ ai có link” hoặc tải file về rồi chọn file. Bản Sites chỉ đọc được link cho phép tải chéo (CORS).
 
 ## Theo mã hàng
 
-- SL hợp đồng (SLHĐ, mỗi PO chỉ tính một lần), đã nhận BTP (ưu tiên file nhận, nếu chưa có thì lấy từ file kho), đã in (tổng giao), giao đạt, lỗi (hỏng in + lỗi vải), còn phải giao.
-- Mã có nhiều hình in (ORBIT/TRIBORD…) lấy số theo hình in có giao đạt thấp nhất; bấm vào dòng để xem từng hình in.
-- Mã khách đã booking nhưng chưa có trong file nhận/giao hiện là **Chưa nhận BTP**.
-- Hạn giao lấy từ file booking, kèm số ngày còn lại hoặc số ngày trễ. Trạng thái: Đã giao đủ, Đang in, Thiếu BTP, Chưa nhận BTP, Trễ hạn, Sắp tới hạn (≤ 3 ngày chưa nhận BTP).
+Mỗi dòng là một lô: Khách hàng, Mã hàng (kèm số phiếu), Model, Màu, Mùa, SLHĐ tổng, đã nhận BTP, đã in (giao), giao đạt, lỗi (hỏng in + lỗi vải), còn thiếu, hạn giao, trạng thái (Đã giao đủ, Đang in, Thiếu BTP, Chưa nhận BTP, Trễ hạn, Sắp tới hạn). Bấm vào lô để xem từng dòng PO với số đã phân bổ và cách nối (phiếu / FIFO).
 
 ## Đối chiếu thay đổi booking
 

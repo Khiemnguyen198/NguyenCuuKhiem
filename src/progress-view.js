@@ -1,5 +1,4 @@
 import { escapeHtml, formatNumber } from './format.js';
-import { productKey } from './keys.js';
 import { customerLogo } from './models-view.js';
 
 const number = (value) => (value == null ? '—' : formatNumber.format(Math.round(value)));
@@ -26,32 +25,27 @@ function customerCell(customers = []) {
   return `<div class="customer-list">${shown}${more}</div>`;
 }
 
-// Matches each booked product of a lead-time group with its receiving / delivery progress.
+// Progress of the booking lots in each lead-time group of the booking.
 export function leadtimeProgress(dashboard, summary) {
-  const itemsByProduct = new Map();
-  for (const item of summary?.items || []) {
-    const current = itemsByProduct.get(item.product);
-    if (!current || item.contract > current.contract) itemsByProduct.set(item.product, item);
-  }
-  const models = dashboard.models || [];
+  const lots = (summary?.items || []).filter((item) => !item.outsideBooking);
   return (dashboard.leadTimes || []).map((group) => {
-    const products = models.filter((model) => String(model.leadTime || '') === String(group.leadTime));
-    const progress = { received: 0, good: 0, done: 0, active: 0, waiting: 0, overdue: 0, products: products.length };
-    for (const model of products) {
-      const item = itemsByProduct.get(productKey(model.model, model.color));
-      if (!item || item.status === 'waiting') progress.waiting += 1;
+    if (!lots.length) return { ...group, progress: null };
+    const inGroup = lots.filter((item) => String(item.leadTime || '') === String(group.leadTime));
+    const progress = { received: 0, good: 0, done: 0, active: 0, waiting: 0, overdue: 0, products: inGroup.length };
+    for (const item of inGroup) {
+      if (item.status === 'waiting') progress.waiting += 1;
       else if (item.status === 'done') progress.done += 1;
       else progress.active += 1;
-      if (item?.overdue) progress.overdue += 1;
-      progress.received += item?.received || 0;
-      progress.good += item?.good || 0;
+      if (item.overdue) progress.overdue += 1;
+      progress.received += item.received;
+      progress.good += item.delivered;
     }
-    return { ...group, progress: models.length ? progress : null };
+    return { ...group, progress };
   });
 }
 
 function statusSummary(progress) {
-  if (!progress) return '<span class="muted">Nhập lại file booking để xem</span>';
+  if (!progress) return '<span class="muted">Chưa có số liệu</span>';
   const parts = [
     progress.done ? `<span class="result-pill result-pill--ok">${number(progress.done)} đủ</span>` : '',
     progress.active ? `<span class="result-pill result-pill--info">${number(progress.active)} đang làm</span>` : '',
@@ -85,8 +79,8 @@ export function renderLeadtimeRows(dashboard, summary) {
 export function renderWarnings(totals, aiReport) {
   const findings = Object.fromEntries((aiReport?.findings || []).map((finding) => [finding.code, finding.count]));
   const chips = [
-    totals?.overdue ? { status: 'overdue', tone: 'danger', text: `${number(totals.overdue)} mã trễ hạn chưa giao đủ` } : null,
-    totals?.atRisk ? { status: 'at-risk', tone: 'warn', text: `${number(totals.atRisk)} mã tới hạn trong 3 ngày chưa nhận BTP` } : null,
+    totals?.overdue ? { status: 'overdue', tone: 'danger', text: `${number(totals.overdue)} lô trễ hạn chưa giao đủ` } : null,
+    totals?.atRisk ? { status: 'at-risk', tone: 'warn', text: `${number(totals.atRisk)} lô tới hạn trong 3 ngày chưa nhận BTP` } : null,
     findings.sunday_output ? { tone: 'warn', text: `${number(findings.sunday_output)} dòng booking có hạn giao Chủ Nhật` } : null,
     findings.sheet_mismatch ? { tone: 'warn', text: `${number(findings.sheet_mismatch)} dòng TH lệch sheet leadtime` } : null,
     findings.daily_total_mismatch ? { tone: 'warn', text: `${number(findings.daily_total_mismatch)} ngày có TỔNG NGÀY trong TH tính sai` } : null,
