@@ -317,6 +317,8 @@ button.warning-chip { cursor: pointer; }
 .customer-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 200px; color: #1d405f; font-weight: 650; }
 .customer-chip > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .customer-logo { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; color: #fff; font-size: 8.5px; font-weight: 800; letter-spacing: .02em; }
+.customer-logo--brand { position: relative; overflow: hidden; }
+.customer-logo--brand img { position: absolute; inset: 0; width: 100%; height: 100%; padding: 2px; object-fit: contain; background: #fff; box-shadow: inset 0 0 0 1px var(--line); border-radius: inherit; }
 .delivery-table__empty { padding: 26px !important; color: #7e90a0; text-align: center !important; }
 .result-pill { display: inline-flex; padding: 5px 8px; border-radius: 999px; font-size: 8.5px; font-weight: 750; white-space: nowrap; }
 .result-pill--pending { color: #60768a; background: #edf2f5; }

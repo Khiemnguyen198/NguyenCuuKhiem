@@ -1,4 +1,5 @@
 import { escapeHtml, formatNumber } from './format.js';
+import { brandOf, logoUrl } from './customer-brands.js';
 
 export const STATUS_COPY = {
   done: { label: 'Đã giao đủ', state: 'ok' },
@@ -24,10 +25,14 @@ const number = (value) => formatNumber.format(Math.round(value || 0));
 const percent = (value) => `${formatNumber.format(Math.round(value * 1000) / 10)}%`;
 const logoColors = ['#1d6fb8', '#11a77a', '#c2410c', '#7c3aed', '#be185d', '#0f766e', '#a16207'];
 
+// Known brands show their own logo over the initials; if the image fails to load (offline,
+// blocked), main.js removes it and the initials remain.
 export function customerLogo(name) {
   const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]).join('').toLocaleUpperCase('vi-VN');
   const hash = [...name].reduce((sum, character) => sum + character.charCodeAt(0), 0);
-  return `<span class="customer-logo" style="background:${logoColors[hash % logoColors.length]}" aria-hidden="true">${escapeHtml(initials || '?')}</span>`;
+  const brand = brandOf(name);
+  const image = brand ? `<img src="${logoUrl(brand)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-brand-logo />` : '';
+  return `<span class="customer-logo${brand ? ' customer-logo--brand' : ''}" style="background:${logoColors[hash % logoColors.length]}" title="${escapeHtml(brand?.name || name)}" aria-hidden="true">${escapeHtml(initials || '?')}${image}</span>`;
 }
 
 const contains = (value, text) => !text || String(value ?? '').toLocaleLowerCase('vi-VN').includes(text.trim().toLocaleLowerCase('vi-VN'));

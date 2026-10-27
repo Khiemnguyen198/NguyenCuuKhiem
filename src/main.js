@@ -1196,6 +1196,10 @@ document.querySelector('#markReviewed').addEventListener('click', async (event) 
     button.disabled = false;
   }
 });
+// A brand logo that cannot load leaves the initials underneath visible.
+document.addEventListener('error', (event) => {
+  if (event.target instanceof HTMLImageElement && event.target.hasAttribute('data-brand-logo')) event.target.remove();
+}, true);
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
   closeChanges();
