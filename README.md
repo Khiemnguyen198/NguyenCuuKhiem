@@ -18,3 +18,7 @@ Mở `http://localhost:4173` trong trình duyệt.
 3. Ứng dụng đọc các cột booking, lưu phiên nhập vào `.data/planner.db`, rồi cập nhật số dòng, tổng sản lượng và tổng lượt hình.
 
 Phần số phút và số máy hiện dùng dữ liệu mô phỏng giao diện. Kết quả thật chỉ được tính sau khi cấu hình định mức thời gian, số máy, số ca và hiệu suất.
+
+## Bản test công khai
+
+GitHub Pages chạy giao diện tĩnh và vẫn có thể đọc, tổng hợp file Excel ngay trong trình duyệt. Do Pages không chạy Node.js, dữ liệu trên bản công khai không được ghi vào SQLite; SQLite chỉ hoạt động khi chạy ứng dụng bằng `npm run dev`.

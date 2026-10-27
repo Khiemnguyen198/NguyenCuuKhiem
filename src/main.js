@@ -3,6 +3,15 @@ import * as XLSX from 'xlsx';
 import './styles.css';
 
 const formatNumber = new Intl.NumberFormat('vi-VN');
+const isStaticPages = import.meta.env.BASE_URL !== '/';
+
+const fallbackDashboard = {
+  source: 'demo',
+  filename: '45.DECATHLON - KẾ HOẠCH BOOK IN CẬP NHẬT NGÀY 26102026.xlsx',
+  rowCount: 2503,
+  totalQuantity: 1768485,
+  totalImpressions: 2953041
+};
 
 const schedule = [
   {
@@ -220,11 +229,16 @@ function showToast(message, type = 'success') {
 }
 
 async function loadDashboard() {
+  if (isStaticPages) {
+    renderDashboard(fallbackDashboard);
+    return;
+  }
   try {
     const response = await fetch('/api/dashboard');
+    if (!response.ok) throw new Error('API không khả dụng');
     renderDashboard(await response.json());
   } catch {
-    showToast('Không thể kết nối SQLite.', 'error');
+    renderDashboard(fallbackDashboard);
   }
 }
 
@@ -239,13 +253,33 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
     const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
     const rows = extractBookingRows(workbook);
     if (!rows.length) throw new Error('Không tìm thấy dữ liệu booking hợp lệ.');
-    const response = await fetch('/api/imports', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename: file.name, rows })
-    });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || 'Không thể lưu dữ liệu.');
+    const localPayload = {
+      source: 'browser',
+      filename: file.name,
+      rowCount: rows.length,
+      totalQuantity: rows.reduce((sum, row) => sum + row.lineQuantity, 0),
+      totalImpressions: rows.reduce((sum, row) => sum + row.lineQuantity * row.printCount, 0)
+    };
+    if (isStaticPages) {
+      renderDashboard(localPayload);
+      showToast(`Đã đọc ${formatNumber.format(localPayload.rowCount)} dòng. Bản web công khai không lưu SQLite.`, 'info');
+      return;
+    }
+    let payload;
+    try {
+      const response = await fetch('/api/imports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, rows })
+      });
+      if (!response.ok) throw new Error('API không khả dụng');
+      payload = await response.json();
+    } catch {
+      payload = localPayload;
+      renderDashboard(payload);
+      showToast(`Đã đọc ${formatNumber.format(payload.rowCount)} dòng. Bản web công khai không lưu SQLite.`, 'info');
+      return;
+    }
     renderDashboard(payload);
     showToast(`Đã nhập ${formatNumber.format(payload.rowCount)} dòng vào SQLite.`);
   } catch (error) {
