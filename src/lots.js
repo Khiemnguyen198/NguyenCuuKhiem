@@ -110,6 +110,24 @@ export function finish(item, startOfToday) {
   return item;
 }
 
+// A row's FIFO figures continue down to its planned days, earliest day first, so a week only
+// gets the part of the row planned in it. Days marked "X" carry no quantity.
+function pourIntoDays(row) {
+  const days = Object.entries(row.allocations || {})
+    .filter(([, value]) => typeof value === 'number' && value > 0)
+    .sort((a, b) => Number(a[0]) - Number(b[0]));
+  const result = Object.fromEntries(days.map(([index]) => [index, { received: 0, delivered: 0, good: 0 }]));
+  for (const field of ['received', 'delivered', 'good']) {
+    let left = row[`${field}Fifo`] || 0;
+    for (const [index, quantity] of days) {
+      const share = Math.min(left, quantity);
+      result[index][field] = share;
+      left -= share;
+    }
+  }
+  return result;
+}
+
 export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLines = [], today = new Date() } = {}) {
   const startOfToday = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
   const lots = buildLots(bookingRows);
@@ -219,6 +237,7 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
     for (const row of lot.rows) {
       row.remainingFifo = Math.max(0, Number(row.lineQuantity || 0) - row.goodFifo);
       row.lotKey = lot.key;
+      row.dayFifo = pourIntoDays(row);
     }
   }
 
@@ -280,12 +299,13 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
 const startOf = (today) => Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
 
 // One batch (week) of the booking: each lot keeps only its rows planned in that week, with the
-// quantities FIFO gave those rows. Defects follow the delivered share.
-export function restrictToRows(items, includeRow, today = new Date()) {
+// week's quantity and the FIFO figures of those days. Defects follow the delivered share.
+// `toRow` returns the row as seen in the view (e.g. its part in one week) or null to drop it.
+export function restrictToRows(items, toRow, today = new Date()) {
   const restricted = [];
   for (const item of items) {
     if (item.outsideBooking) continue;
-    const rows = item.rows.filter(includeRow);
+    const rows = item.rows.map(toRow).filter(Boolean);
     if (!rows.length) continue;
     const sum = (field) => rows.reduce((total, row) => total + (row[field] || 0), 0);
     const share = item.delivered ? sum('deliveredFifo') / item.delivered : 0;

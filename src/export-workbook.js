@@ -12,7 +12,7 @@ export function sortByUrgency(items) {
 }
 
 export function exportFilename(now = new Date(), batch = null) {
-  const week = batch ? `_DOT_${batch.from.slice(8, 10)}${batch.from.slice(5, 7)}-${batch.to.slice(8, 10)}${batch.to.slice(5, 7)}` : '';
+  const week = batch ? `_TUAN_${batch.from.slice(8, 10)}${batch.from.slice(5, 7)}-${batch.to.slice(8, 10)}${batch.to.slice(5, 7)}` : '';
   return `TONG_HOP_GIAO_HANG${week}_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`;
 }
 
@@ -40,7 +40,7 @@ const PROGRESS_COLUMNS = [
   // COLOR in TH mixes the model code and the color name; split for Excel filters.
   ['Model', (row) => row.modelCode, 9],
   ['Màu', (row) => colorName(row.color), 26],
-  ['SL trong đợt', (row) => numberCell(row.lineQuantity), 10, true],
+  ['SL trong tuần', (row) => numberCell(row.lineQuantity), 10, true],
   ['Nhận BTP', (row) => numberCell(row.receivedFifo ?? 0), 10],
   ['Đã in (giao)', (row) => numberCell(row.deliveredFifo ?? 0), 10],
   ['Còn thiếu', (row) => numberCell(row.remainingFifo ?? (row.bookedLineQuantity ?? row.lineQuantity)), 10],

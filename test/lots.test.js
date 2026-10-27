@@ -54,7 +54,7 @@ test('matches by ticket first and pours the rest FIFO by due date', () => {
   ]);
   assert.equal(totals.contract, 250);
 
-  const week = restrictToRows(items, (r) => r.po === 'PO3' || r.po === 'PO1', new Date(2026, 9, 27));
+  const week = restrictToRows(items, (r) => (r.po === 'PO3' || r.po === 'PO1' ? r : null), new Date(2026, 9, 27));
   assert.deepEqual(week.map((item) => [item.contract, item.good]).sort(), [[100, 100], [30, 10]].sort());
 });
 
@@ -70,4 +70,21 @@ test('filters lots by Mã hàng, Model and Màu columns', async () => {
   assert.equal(matchesFilters(item, { status: 'all', columns: { model: '3532', modelCode: '', color: 'bea' } }), true);
   assert.equal(matchesFilters(item, { status: 'all', columns: { model: '', modelCode: '8999', color: '' } }), false);
   assert.equal(matchesFilters(item, { status: 'all', columns: { color: '9046670' } }), false, 'color filter ignores the model code prefix');
+});
+
+test('pours a row into its planned days so a week only gets its own part', async () => {
+  const { batchRow } = await import('../src/batches.js');
+  const days = [{ date: '2026-10-24' }, { date: '2026-10-26' }, { date: '2026-10-27' }, { date: '2026-11-02' }];
+  const bookingRows = [row('PO1', 300, '2026-11-05', { allocations: { 0: 100, 2: 'X', 3: 200 } })];
+  const deliveryLines = [delivery({ received: 250, delivered: 180, good: 150 })];
+  const { items } = summarizeLots({ bookingRows, deliveryLines });
+  assert.deepEqual(bookingRows[0].dayFifo, { 0: { received: 100, delivered: 100, good: 100 }, 3: { received: 150, delivered: 80, good: 50 } });
+
+  const lastWeek = { dayIndexes: [0] };
+  const thisWeek = { dayIndexes: [1, 2] };
+  const nextWeek = { dayIndexes: [3] };
+  assert.deepEqual(['lineQuantity', 'receivedFifo', 'goodFifo', 'remainingFifo'].map((key) => batchRow(bookingRows[0], days, lastWeek)[key]), [100, 100, 100, 0]);
+  assert.deepEqual(['lineQuantity', 'goodFifo'].map((key) => batchRow(bookingRows[0], days, thisWeek)[key]), [0, 0], 'an X-only week has no quantity');
+  const week = restrictToRows(items, (r) => batchRow(r, days, nextWeek));
+  assert.deepEqual([week[0].contract, week[0].received, week[0].delivered, week[0].good, week[0].remaining], [200, 150, 80, 50, 150]);
 });
