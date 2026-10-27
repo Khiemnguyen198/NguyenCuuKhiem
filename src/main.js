@@ -7,6 +7,7 @@ const isStaticPages = import.meta.env.PROD || import.meta.env.BASE_URL !== '/';
 
 const fallbackDashboard = {
   source: 'demo',
+  importId: 'demo-plan',
   filename: '45.DECATHLON - KẾ HOẠCH BOOK IN CẬP NHẬT NGÀY 26102026.xlsx',
   rowCount: 2503,
   totalQuantity: 1768485,
@@ -28,6 +29,7 @@ let dashboardState = fallbackDashboard;
 let settingsState = { ...defaultSettings };
 let fileHistoryState = [{
   id: 'demo-original',
+  importId: 'demo-plan',
   category: 'original',
   filename: fallbackDashboard.filename,
   createdAt: '2026-10-26T14:32:00+07:00',
@@ -103,16 +105,25 @@ document.querySelector('#app').innerHTML = `
       <header class="topbar">
         <div class="title-group">
           <div>
-            <p class="eyebrow" id="pageEyebrow">BẢNG ĐIỀU PHỐI</p>
-            <h1 id="pageTitle">Kế hoạch sản xuất</h1>
+            <p class="eyebrow" id="pageEyebrow">DANH SÁCH KẾ HOẠCH</p>
+            <h1 id="pageTitle">Kế hoạch</h1>
           </div>
           <button class="primary-button" id="importButton"><i class="ph ph-upload-simple"></i>Nhập file booking</button>
+          <button class="back-button" id="backToPlans" hidden><i class="ph ph-arrow-left"></i>Danh sách kế hoạch</button>
           <input id="fileInput" type="file" accept=".xlsx,.xls" hidden />
         </div>
         <div class="topbar__actions">
           <div class="date-stamp"><i class="ph ph-calendar-blank"></i><div><strong>Thứ Ba, 27/10/2026</strong><span>Tuần 26/10 – 31/10/2026</span></div></div>
         </div>
       </header>
+
+      <section class="plan-list-view" id="planListView">
+        <div class="plan-list-heading">
+          <div><p class="section-heading__overline">DỮ LIỆU ĐÃ NHẬP</p><h2>Các file kế hoạch</h2><p>Chọn một file để mở bảng điều phối và xem năng lực sản xuất.</p></div>
+          <div class="plan-list-total"><strong id="planCount">0</strong><span>kế hoạch</span></div>
+        </div>
+        <div class="plan-list" id="planFiles"></div>
+      </section>
 
       <section class="overview-view" id="overviewView" hidden>
         <div class="overview-intro">
@@ -139,7 +150,7 @@ document.querySelector('#app').innerHTML = `
         </div>
       </section>
 
-      <div class="workspace" id="planningView">
+      <div class="workspace" id="planningView" hidden>
         <div class="workspace__main">
           <section class="file-strip" aria-live="polite">
             <div class="file-icon"><i class="ph ph-file-xls"></i></div>
@@ -354,6 +365,30 @@ function fileRow(file) {
   `;
 }
 
+function planRow(file) {
+  const safeFilename = escapeHtml(file.filename);
+  const metadata = [
+    file.rowCount ? `${formatNumber.format(file.rowCount)} dòng booking` : null,
+    file.totalQuantity ? `${formatNumber.format(file.totalQuantity)} sản phẩm` : null
+  ].filter(Boolean).join(' • ');
+  return `
+    <button class="plan-row" data-plan-id="${escapeHtml(file.importId)}">
+      <span class="plan-row__icon"><i class="ph ph-calendar-check"></i></span>
+      <span class="plan-row__body"><strong title="${safeFilename}">${safeFilename}</strong><span>${escapeHtml(metadata || 'Kế hoạch sản xuất')}</span><small>Cập nhật ${escapeHtml(formatFileDate(file.createdAt))}</small></span>
+      <span class="plan-row__status"><i class="ph ph-check-circle"></i>Sẵn sàng điều phối</span>
+      <i class="ph ph-caret-right plan-row__arrow"></i>
+    </button>
+  `;
+}
+
+function renderPlanList(files = fileHistoryState) {
+  const plans = files.filter((file) => file.category === 'original');
+  document.querySelector('#planCount').textContent = formatNumber.format(plans.length);
+  document.querySelector('#planFiles').innerHTML = plans.length
+    ? plans.map(planRow).join('')
+    : '<div class="plan-list-empty"><i class="ph ph-calendar-x"></i><strong>Chưa có file kế hoạch</strong><span>Nhấn “Nhập file booking” để tạo kế hoạch đầu tiên.</span></div>';
+}
+
 function renderFileHistory(files = fileHistoryState) {
   fileHistoryState = files;
   const groups = {
@@ -366,6 +401,7 @@ function renderFileHistory(files = fileHistoryState) {
     document.querySelector(`#${category}Badge`).textContent = formatNumber.format(items.length);
     document.querySelector(`#${category}Files`).innerHTML = items.length ? items.map(fileRow).join('') : emptyHistory(category === 'delivered' ? 'file đã giao' : category === 'processed' ? 'file đã xử lý' : 'file gốc');
   }
+  renderPlanList(files);
 }
 
 async function loadFileHistory() {
@@ -389,11 +425,25 @@ async function loadFileHistory() {
 
 function showPage(pageName) {
   const isOverview = pageName === 'Tổng quan';
+  const isPlanList = pageName === 'Kế hoạch';
   document.querySelector('#overviewView').hidden = !isOverview;
-  document.querySelector('#planningView').hidden = isOverview;
-  document.querySelector('#pageEyebrow').textContent = isOverview ? 'QUẢN LÝ FILE' : 'BẢNG ĐIỀU PHỐI';
-  document.querySelector('#pageTitle').textContent = isOverview ? 'Tổng quan' : 'Kế hoạch sản xuất';
+  document.querySelector('#planListView').hidden = !isPlanList;
+  document.querySelector('#planningView').hidden = true;
+  document.querySelector('#backToPlans').hidden = true;
+  document.querySelector('#pageEyebrow').textContent = isOverview ? 'QUẢN LÝ FILE' : 'DANH SÁCH KẾ HOẠCH';
+  document.querySelector('#pageTitle').textContent = isOverview ? 'Tổng quan' : 'Kế hoạch';
   if (isOverview) loadFileHistory();
+  if (isPlanList) loadFileHistory();
+}
+
+async function openPlanDetail(importId = null) {
+  document.querySelector('#overviewView').hidden = true;
+  document.querySelector('#planListView').hidden = true;
+  document.querySelector('#planningView').hidden = false;
+  document.querySelector('#backToPlans').hidden = false;
+  document.querySelector('#pageEyebrow').textContent = 'KẾ HOẠCH SẢN XUẤT';
+  document.querySelector('#pageTitle').textContent = 'Điều phối kế hoạch';
+  await loadDashboard(importId);
 }
 
 function calculateCapacity(data, settings) {
@@ -491,13 +541,24 @@ function showToast(message, type = 'success') {
   toastTimer = setTimeout(() => { toast.className = 'toast'; }, 3200);
 }
 
-async function loadDashboard() {
+async function loadDashboard(importId = null) {
   if (isStaticPages) {
-    renderDashboard(fallbackDashboard);
+    const selectedPlan = importId && importId !== fallbackDashboard.importId
+      ? fileHistoryState.find((file) => file.category === 'original' && String(file.importId) === String(importId))
+      : null;
+    renderDashboard(selectedPlan ? {
+      source: 'browser',
+      importId: selectedPlan.importId,
+      filename: selectedPlan.filename,
+      rowCount: Number(selectedPlan.rowCount || 0),
+      totalQuantity: Number(selectedPlan.totalQuantity || 0),
+      totalImpressions: Number(selectedPlan.totalImpressions || 0),
+      uniquePo: Number(selectedPlan.uniquePo || 0)
+    } : fallbackDashboard);
     return;
   }
   try {
-    const response = await fetch('/api/dashboard');
+    const response = await fetch(importId ? `/api/dashboard?id=${encodeURIComponent(importId)}` : '/api/dashboard');
     if (!response.ok) throw new Error('API không khả dụng');
     renderDashboard(await response.json());
   } catch {
@@ -527,6 +588,7 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
     if (!rows.length) throw new Error('Không tìm thấy dữ liệu booking hợp lệ.');
     const localPayload = {
       source: 'browser',
+      importId: `browser-${Date.now()}`,
       filename: file.name,
       rowCount: rows.length,
       totalQuantity: rows.reduce((sum, row) => sum + row.lineQuantity, 0),
@@ -534,11 +596,23 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
       uniquePo: new Set(rows.map((row) => row.po)).size
     };
     if (isStaticPages) {
-      renderDashboard(localPayload);
       const importId = crypto.randomUUID();
-      const files = [{ id: importId, importId, category: 'original', filename: file.name, createdAt: new Date().toISOString(), rowCount: rows.length, totalQuantity: localPayload.totalQuantity, note: 'Chỉ lưu thông tin file; file Excel gốc không bị thay đổi.' }, ...fileHistoryState.filter((item) => item.id !== 'demo-original')];
+      localPayload.importId = importId;
+      const files = [{
+        id: importId,
+        importId,
+        category: 'original',
+        filename: file.name,
+        createdAt: new Date().toISOString(),
+        rowCount: rows.length,
+        totalQuantity: localPayload.totalQuantity,
+        totalImpressions: localPayload.totalImpressions,
+        uniquePo: localPayload.uniquePo,
+        note: 'Chỉ lưu thông tin file; file Excel gốc không bị thay đổi.'
+      }, ...fileHistoryState.filter((item) => item.id !== 'demo-original')];
       saveBrowserFiles(files);
       renderFileHistory(files);
+      openPlanDetail(importId);
       showToast(`Đã đọc ${formatNumber.format(localPayload.rowCount)} dòng. Bản web công khai không lưu SQLite.`, 'info');
       return;
     }
@@ -558,7 +632,8 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
       return;
     }
     renderDashboard(payload);
-    loadFileHistory();
+    await loadFileHistory();
+    openPlanDetail(payload.importId);
     showToast(`Đã nhập ${formatNumber.format(payload.rowCount)} dòng vào SQLite.`);
   } catch (error) {
     showToast(error.message, 'error');
@@ -576,6 +651,12 @@ document.querySelectorAll('.nav__item').forEach((item) => item.addEventListener(
   else if (item.dataset.page === 'Tổng quan' || item.dataset.page === 'Kế hoạch') showPage(item.dataset.page);
   else showToast(`${item.dataset.page} đang được hoàn thiện trong bản test.`, 'info');
 }));
+
+document.querySelector('#planFiles').addEventListener('click', (event) => {
+  const plan = event.target.closest('[data-plan-id]');
+  if (plan) openPlanDetail(plan.dataset.planId);
+});
+document.querySelector('#backToPlans').addEventListener('click', () => showPage('Kế hoạch'));
 
 document.querySelector('#settingsShortcut').addEventListener('click', openSettings);
 document.querySelectorAll('[data-close-settings]').forEach((button) => button.addEventListener('click', closeSettings));

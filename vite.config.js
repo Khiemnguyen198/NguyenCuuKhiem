@@ -68,6 +68,7 @@ database.exec(`
 
 const demoDashboard = {
   source: 'demo',
+  importId: 'demo-plan',
   filename: '45.DECATHLON - KẾ HOẠCH BOOK IN CẬP NHẬT NGÀY 26102026.xlsx',
   importedAt: '2026-10-27T09:14:00.000Z',
   rowCount: 2503,
@@ -100,8 +101,10 @@ function sendJson(response, status, payload) {
   response.end(JSON.stringify(payload));
 }
 
-function latestDashboard() {
-  const latest = database.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
+function latestDashboard(importId = null) {
+  const latest = importId
+    ? database.prepare('SELECT * FROM imports WHERE id = ?').get(importId)
+    : database.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
   if (!latest) return demoDashboard;
   const leadTimes = database.prepare(`
     SELECT lead_time AS label, COUNT(*) AS rows, SUM(line_quantity) AS quantity
@@ -111,6 +114,7 @@ function latestDashboard() {
   const uniquePo = database.prepare('SELECT COUNT(DISTINCT po) AS count FROM booking_rows WHERE import_id = ?').get(latest.id).count;
   return {
     source: 'sqlite',
+    importId: latest.id,
     filename: latest.filename,
     importedAt: latest.imported_at,
     rowCount: latest.row_count,
@@ -141,7 +145,8 @@ function sqliteApi() {
     configureServer(server) {
       server.middlewares.use('/api/dashboard', (request, response) => {
         if (request.method !== 'GET') return sendJson(response, 405, { error: 'Method not allowed' });
-        sendJson(response, 200, latestDashboard());
+        const requestedId = Number(new URL(request.url, 'http://local').searchParams.get('id')) || null;
+        sendJson(response, 200, latestDashboard(requestedId));
       });
 
       server.middlewares.use('/api/settings', async (request, response) => {

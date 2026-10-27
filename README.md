@@ -16,6 +16,7 @@ Mở `http://localhost:4173` trong trình duyệt.
 1. Chọn **Nhập file booking**.
 2. Chọn workbook `.xlsx` có sheet `TH`, hoặc các sheet `LEADTIME 1/2/3/5 NGÀY`.
 3. Ứng dụng đọc các cột booking, lưu phiên nhập vào `.data/planner.db`, rồi cập nhật số dòng, tổng sản lượng và tổng lượt hình.
+4. Mở mục **Kế hoạch**, chọn đúng file trong danh sách để vào bảng điều phối của lần import đó.
 
 Mục **Tổng quan** phân loại lịch sử file thành:
 
