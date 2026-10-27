@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { STATUS_COPY } from './models-view.js';
+import { STATUS_COPY, colorName } from './models-view.js';
 import { dailyLoad } from './booking-import.js';
 
 const pad = (value) => String(value).padStart(2, '0');
@@ -37,6 +37,9 @@ const TH_COLUMNS = [
 // Appended after the daily plan so columns A onward stay exactly as in TH. Row figures come
 // from the FIFO allocation of each lot down to its PO rows; lot figures repeat on each row.
 const PROGRESS_COLUMNS = [
+  // COLOR in TH mixes the model code and the color name; split for Excel filters.
+  ['Model', (row) => row.modelCode, 9],
+  ['Màu', (row) => colorName(row.color), 26],
   ['SL trong đợt', (row) => numberCell(row.lineQuantity), 10, true],
   ['Nhận BTP', (row) => numberCell(row.receivedFifo ?? 0), 10],
   ['Đã in (giao)', (row) => numberCell(row.deliveredFifo ?? 0), 10],

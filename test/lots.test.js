@@ -63,3 +63,11 @@ test('keeps warehouse products without booking lots apart', () => {
   assert.equal(items.find((item) => item.outsideBooking).good, 40);
   assert.deepEqual([totals.contract, totals.outside], [100, 1]);
 });
+
+test('filters lots by Mã hàng, Model and Màu columns', async () => {
+  const { matchesFilters } = await import('../src/models-view.js');
+  const item = { model: '353234', modelCode: '9046670', color: '9046670 1P BEA FUNSTRIPES', customer: 'Decathlon', status: 'printing', rows: [] };
+  assert.equal(matchesFilters(item, { status: 'all', columns: { model: '3532', modelCode: '', color: 'bea' } }), true);
+  assert.equal(matchesFilters(item, { status: 'all', columns: { model: '', modelCode: '8999', color: '' } }), false);
+  assert.equal(matchesFilters(item, { status: 'all', columns: { color: '9046670' } }), false, 'color filter ignores the model code prefix');
+});

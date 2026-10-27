@@ -38,5 +38,5 @@ test('fills the progress columns from the FIFO allocation', () => {
   const table = XLSX.utils.sheet_to_json(buildExportWorkbook({ booking: { rows, days: [] }, lots: items }).Sheets.TH, { header: 1, defval: null, raw: true, blankrows: true });
   const header = table[0];
   const value = (title) => table[5][header.indexOf(title)];
-  assert.deepEqual([value('Nhận BTP'), value('Đã in (giao)'), value('Còn thiếu'), value('SLHĐ tổng (lô)'), value('Nối bằng')], [80, 60, 45, 100, 'FIFO']);
+  assert.deepEqual([value('Model'), value('Màu'), value('Nhận BTP'), value('Đã in (giao)'), value('Còn thiếu'), value('SLHĐ tổng (lô)'), value('Nối bằng')], ['1234567', 'X', 80, 60, 45, 100, 'FIFO']);
 });

@@ -9,7 +9,7 @@ import { DEMO_DASHBOARD } from './demo-data.js';
 import { escapeHtml, formatFileDate, formatNumber } from './format.js';
 import { readJson, writeJson } from './storage.js';
 import { appTemplate } from './template.js';
-import { PAGE_SIZE, matchesFilters, renderCustomerRows, renderKpis, renderModelRows } from './models-view.js';
+import { PAGE_SIZE, colorName, matchesFilters, renderCustomerRows, renderKpis, renderModelRows } from './models-view.js';
 import { readWarehouseWorkbook } from './warehouse-import.js';
 import { compactReceiptLines, readReceiptsWorkbook } from './receipts-import.js';
 import { restrictToRows, summarizeLots, totalsOf } from './lots.js';
@@ -446,7 +446,7 @@ const sourceState = { receipts: { ...EMPTY_SOURCE }, deliveries: { ...EMPTY_SOUR
 // Lots of the whole booking (FIFO-filled), and the view of them the page shows (maybe one batch).
 let lotSummary = null;
 let warehouseSummary = null;
-const modelFilters = { customer: '', status: 'open', query: '' };
+const modelFilters = { customer: '', status: 'open', query: '', columns: { model: '', modelCode: '', color: '' } };
 let expandedModelKey = null;
 let modelLimit = PAGE_SIZE;
 
@@ -485,7 +485,7 @@ function renderWarehouse() {
   document.querySelector('#warehouseMeta').textContent = names.length
     ? `${names.join(' · ')} · ${formatNumber.format(items.length - totals.outside)} lô booking · ${formatNumber.format(totals.outside)} mã ngoài booking`
     : 'Chưa có dữ liệu nhận/giao. Nhập ở mục Tổng quan → Nguồn dữ liệu.';
-  document.querySelector('#modelKpis').innerHTML = renderKpis(totals, { batch: Boolean(booking.batch) });
+  renderColumnOptions(items);
   const select = document.querySelector('#customerFilter');
   select.innerHTML = `<option value="">Tất cả khách hàng</option>${[...customers].sort((a, b) => a.localeCompare(b, 'vi')).map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')}`;
   select.value = modelFilters.customer;
@@ -578,12 +578,28 @@ function renderPlanProgress() {
   document.querySelector('#planGoodMeta').textContent = hasActual ? `${formatNumber.format(lots.filter((item) => item.status === 'done').length)} lô giao đủ` : '—';
 }
 
+// Suggestions for the Mã hàng / Model / Màu filters, from the booking lots.
+function renderColumnOptions(items) {
+  const lots = items.filter((item) => !item.outsideBooking);
+  const values = {
+    model: lots.map((item) => item.model),
+    modelCode: lots.map((item) => item.modelCode),
+    color: lots.map((item) => colorName(item.color))
+  };
+  for (const [column, list] of Object.entries(values)) {
+    const unique = [...new Set(list.filter(Boolean).map(String))].sort((a, b) => a.localeCompare(b, 'vi', { numeric: true }));
+    document.querySelector(`#filterOptions-${column}`).innerHTML = unique.map((value) => `<option value="${escapeHtml(value)}"></option>`).join('');
+  }
+}
+
 function renderModelTable() {
   if (!warehouseSummary) return;
   const scoped = warehouseSummary.items.filter((item) => matchesFilters(item, { ...modelFilters, status: 'any' }));
+  // The figures above the table follow the customer / column / search filters.
+  document.querySelector('#modelKpis').innerHTML = renderKpis(totalsOf(scoped).totals, { batch: Boolean(activeBooking().batch) });
   const filtered = sortByUrgency(scoped.filter((item) => matchesFilters(item, modelFilters)));
   document.querySelector('#customerBody').innerHTML = renderCustomerRows(
-    warehouseSummary.items.filter((item) => matchesFilters(item, { query: modelFilters.query, status: 'all' })),
+    warehouseSummary.items.filter((item) => matchesFilters(item, { query: modelFilters.query, columns: modelFilters.columns, status: 'all' })),
     modelFilters.customer
   ) || '<tr><td colspan="8" class="delivery-table__empty">Chưa có dữ liệu.</td></tr>';
   document.querySelector('#modelBody').innerHTML = renderModelRows(filtered, expandedModelKey, modelLimit);
@@ -1060,6 +1076,11 @@ document.querySelector('#modelSearch').addEventListener('input', (event) => {
   modelLimit = PAGE_SIZE;
   renderModelTable();
 });
+document.querySelectorAll('[data-column-filter]').forEach((input) => input.addEventListener('input', () => {
+  modelFilters.columns[input.dataset.columnFilter] = input.value;
+  modelLimit = PAGE_SIZE;
+  renderModelTable();
+}));
 document.querySelector('#customerFilter').addEventListener('change', (event) => {
   modelFilters.customer = event.target.value;
   modelLimit = PAGE_SIZE;

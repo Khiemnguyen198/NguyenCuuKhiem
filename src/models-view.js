@@ -30,8 +30,11 @@ export function customerLogo(name) {
   return `<span class="customer-logo" style="background:${logoColors[hash % logoColors.length]}" aria-hidden="true">${escapeHtml(initials || '?')}</span>`;
 }
 
-export function matchesFilters(item, { customer, status, query }) {
+const contains = (value, text) => !text || String(value ?? '').toLocaleLowerCase('vi-VN').includes(text.trim().toLocaleLowerCase('vi-VN'));
+
+export function matchesFilters(item, { customer, status, query, columns = {} }) {
   if (customer && item.customer !== customer) return false;
+  if (!contains(item.model, columns.model) || !contains(item.modelCode, columns.modelCode) || !contains(colorName(item.color), columns.color)) return false;
   if (status === 'any') return matchesQuery(item, query);
   // Warehouse products without a booking lot only show under their own filter.
   if ((status === 'outside') !== Boolean(item.outsideBooking)) return false;

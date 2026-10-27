@@ -55,7 +55,13 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel }) {
         </section>
         <section class="delivery-summary">
           <div class="model-filters">
-            <label class="model-search"><i class="ph ph-magnifying-glass"></i><input id="modelSearch" type="search" placeholder="Tìm mã hàng, model, màu, số phiếu…" /></label>
+            <label class="model-search"><i class="ph ph-magnifying-glass"></i><input id="modelSearch" type="search" placeholder="Tìm PO, số phiếu…" /></label>
+            <div class="column-filters" role="group" aria-label="Lọc theo cột">
+              <input type="search" data-column-filter="model" list="filterOptions-model" placeholder="Mã hàng" aria-label="Lọc mã hàng" />
+              <input type="search" data-column-filter="modelCode" list="filterOptions-modelCode" placeholder="Model" aria-label="Lọc model" />
+              <input type="search" data-column-filter="color" list="filterOptions-color" placeholder="Màu" aria-label="Lọc màu" />
+              <datalist id="filterOptions-model"></datalist><datalist id="filterOptions-modelCode"></datalist><datalist id="filterOptions-color"></datalist>
+            </div>
             <select data-batch-select aria-label="Chọn đợt booking"></select>
             <select id="customerFilter" aria-label="Lọc theo khách hàng"><option value="">Tất cả khách hàng</option></select>
             <div class="status-filters" id="statusFilters" role="group" aria-label="Lọc theo trạng thái">${STATUS_FILTERS.map(([value, label]) => `<button type="button" data-status="${value}"${value === 'open' ? ' aria-pressed="true"' : ''}>${label}<span data-status-count="${value}"></span></button>`).join('')}</div>
