@@ -28,3 +28,11 @@ test('compacts receipts per product, season and ticket', () => {
   assert.equal(compact.length, 2);
   assert.deepEqual([compact[0].received, compact[0].shipped, compact[0].receipts, compact[0].firstDate, compact[0].date], [25, 5, 2, '2026-10-24', '2026-10-26']);
 });
+
+test('reads the real layout where both totals are labelled TOTAL', () => {
+  const header = ['NGÀY NHẬN', 'CODE', 'KHÁCH HÀNG', 'WEB', 'RẬP', 'SỐ CHI TIẾT IN', 'MÃ HÀNG', 'MÀU', 'PO', 'SS', 'SLHĐ', 'SLHĐ TỔNG', 'GROUP SIZE', 'BÀN', 'TOTAL', 'XS', 'S', 'NGÀY XUẤT', 'TOTAL', 'XS', 'S', 'TOTAL'];
+  const rows = Array.from({ length: 9 }, () => []);
+  rows.push(header, [46322, 'DEC-335516', 'DEC', null, null, null, 335516, 'PAT29784', 73576, null, 1965, 1965, null, 1, 1334, 600, 734, 'OK', 1300, 580, 720, -34]);
+  const [line] = readReceiptsSheet(XLSX.utils.aoa_to_sheet(rows));
+  assert.deepEqual([line.model, line.po, line.received, line.shipped, line.date], ['335516', '73576', 1334, 1300, '2026-10-27']);
+});

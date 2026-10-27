@@ -3,7 +3,7 @@ import './styles.css';
 import { analyzeBookingRows } from './local-ai.js';
 import { bestStandardSheet } from './config-ai.js';
 import { crossCheckSheets, readBooking, readWorkbook, summarizeBooking } from './booking-import.js';
-import { batchRows, defaultWeekKey, weeksFromDays } from './batches.js';
+import { batchRow, batchRows, defaultWeekKey, weeksFromDays } from './batches.js';
 import { workWeekLabel } from './calendar.js';
 import { DEMO_DASHBOARD } from './demo-data.js';
 import { escapeHtml, formatFileDate, formatNumber } from './format.js';
@@ -18,6 +18,7 @@ import { downloadFromLink } from './sources.js';
 import { buildExportWorkbook, downloadWorkbook, exportFilename, sortByUrgency } from './export-workbook.js';
 import { compactRows, diffBookingRows } from './booking-diff.js';
 import { renderChangeList, renderChangeReport, unreviewedCount } from './changes-view.js';
+import { checkIssues, renderCheckReport } from './check-view.js';
 
 const isStaticPages = import.meta.env.PROD || import.meta.env.BASE_URL !== '/';
 
@@ -475,9 +476,8 @@ function renderWarehouse() {
   // Built after the FIFO pass so batch copies of the rows carry their allocated figures.
   const booking = activeBooking();
   renderBatchOptions();
-  const inBatch = (row) => booking.batch.dayIndexes.some((index) => String(index) in (row.allocations || {}));
   const viewItems = booking.batch
-    ? [...restrictToRows(lotSummary.items, inBatch), ...lotSummary.items.filter((item) => item.outsideBooking)]
+    ? [...restrictToRows(lotSummary.items, (row) => batchRow(row, bookingDetail.days, booking.batch)), ...lotSummary.items.filter((item) => item.outsideBooking)]
     : lotSummary.items;
   warehouseSummary = { items: viewItems, ...totalsOf(viewItems) };
   const { items, totals, customers } = warehouseSummary;
@@ -501,8 +501,9 @@ function bookingWeeks() {
 function selectedWeek() {
   const weeks = bookingWeeks();
   if (!weeks.length) return null;
-  if (!batchKey || (batchKey !== 'all' && !weeks.some((week) => week.key === batchKey))) batchKey = defaultWeekKey(weeks);
-  return batchKey === 'all' ? null : weeks.find((week) => week.key === batchKey);
+  // The booking is always followed one week at a time.
+  if (!weeks.some((week) => week.key === batchKey)) batchKey = defaultWeekKey(weeks);
+  return weeks.find((week) => week.key === batchKey);
 }
 
 // The booking as the rest of the page sees it: the whole file, or only the selected batch.
@@ -521,10 +522,10 @@ function renderBatchOptions() {
   const weeks = bookingWeeks();
   selectedWeek();
   const options = weeks.length
-    ? [`<option value="all">Tất cả booking</option>`, ...weeks.map((week) => {
+    ? weeks.map((week) => {
       const count = bookingDetail.rows.filter((row) => week.dayIndexes.some((index) => String(index) in (row.allocations || {}))).length;
       return `<option value="${week.key}">${escapeHtml(week.label)} · ${formatNumber.format(count)} dòng</option>`;
-    })].join('')
+    }).join('')
     : '<option value="all">Tất cả booking (file chưa có phân bổ ngày)</option>';
   document.querySelectorAll('[data-batch-select]').forEach((select) => {
     select.innerHTML = options;
@@ -559,15 +560,22 @@ function renderOverview() {
   document.querySelector('#overviewMeta').textContent = latestBooking.source === 'demo'
     ? 'Đang hiện booking mẫu. Nhập file booking thật ở mục Nguồn dữ liệu.'
     : booking.batch
-      ? `${booking.batch.label}: ${formatNumber.format(booking.rowCount)} dòng booking phân bổ trong đợt · nhận/giao chia cho từng dòng theo hạn giao (FIFO).`
+      ? `${booking.batch.label}: ${formatNumber.format(booking.rowCount)} dòng booking phân bổ trong tuần · số lượng, nhận và giao chỉ tính phần của tuần này.`
       : `Booking: ${latestBooking.filename} · số nhận/giao lấy từ file nhận và file giao mới nhất.`;
 }
 
-// Plan pages show the lots of the newest booking; older imports have no row detail to match.
+// Plan pages: the newest booking is shown for the selected week, like the overview; older
+// imports have no row detail and keep their file totals.
 function renderPlanProgress() {
-  const isLatest = String(dashboardState.importId) === String(latestBooking.importId);
-  const lots = isLatest ? (lotSummary?.items || []).filter((item) => !item.outsideBooking) : [];
-  document.querySelector('#planLeadtimeBody').innerHTML = renderLeadtimeRows(dashboardState, isLatest ? { items: lots } : null);
+  const isLatest = String(dashboardState.importId) === String(latestBooking.importId) && latestBooking.source !== 'demo';
+  const booking = isLatest ? activeBooking() : dashboardState;
+  const lots = isLatest ? (warehouseSummary?.items || []).filter((item) => !item.outsideBooking) : [];
+  if (isLatest && booking.batch) {
+    document.querySelector('#totalQuantity').textContent = formatNumber.format(booking.totalQuantity);
+    document.querySelector('#totalImpressions').textContent = formatNumber.format(booking.totalImpressions);
+    document.querySelector('#rowCount').textContent = `${formatNumber.format(booking.rowCount)} dòng · ${booking.batch.label}`;
+  }
+  document.querySelector('#planLeadtimeBody').innerHTML = renderLeadtimeRows(booking, isLatest ? { items: lots } : null);
   const sum = (field) => lots.reduce((total, item) => total + item[field], 0);
   const hasActual = lots.some((item) => item.received || item.delivered);
   document.querySelector('#planReceived').textContent = hasActual ? formatNumber.format(sum('received')) : '—';
@@ -670,6 +678,37 @@ async function loadLatestAiReport() {
   } catch {
     latestAiReport = null;
   }
+}
+
+function checkSources() {
+  return {
+    booking: latestBooking.source === 'demo' ? null : { filename: latestBooking.filename, importedAt: latestBooking.importedAt },
+    receipts: sourceState.receipts,
+    deliveries: sourceState.deliveries
+  };
+}
+
+function renderCheck() {
+  if (!warehouseSummary) return;
+  const booking = activeBooking();
+  document.querySelector('#checkReport').innerHTML = renderCheckReport({ booking, summary: warehouseSummary, sources: checkSources(), aiReport: latestAiReport });
+  const issues = checkIssues({ booking, summary: warehouseSummary });
+  document.querySelector('#checkStatus').textContent = issues.join(' ') || `Sẵn sàng xuất ${formatNumber.format(booking.rows?.length || 0)} dòng.`;
+  document.querySelector('#checkModal [data-export]').disabled = Boolean(issues.length);
+}
+
+function openCheck() {
+  renderCheck();
+  const modal = document.querySelector('#checkModal');
+  modal.classList.add('modal--open');
+  modal.setAttribute('aria-hidden', 'false');
+  modal.querySelector('[data-close-check].icon-button').focus();
+}
+
+function closeCheck() {
+  const modal = document.querySelector('#checkModal');
+  modal.classList.remove('modal--open');
+  modal.setAttribute('aria-hidden', 'true');
 }
 
 async function exportSummary() {
@@ -954,8 +993,14 @@ document.querySelectorAll('[data-batch-select]').forEach((select) => select.addE
   expandedModelKey = null;
   modelLimit = PAGE_SIZE;
   renderWarehouse();
+  renderCheck();
 }));
-document.querySelectorAll('[data-export]').forEach((button) => button.addEventListener('click', () => withBusyButton(button, 'Đang xuất', exportSummary)));
+document.querySelectorAll('[data-check]').forEach((button) => button.addEventListener('click', openCheck));
+document.querySelectorAll('[data-close-check]').forEach((button) => button.addEventListener('click', closeCheck));
+document.querySelectorAll('[data-export]').forEach((button) => button.addEventListener('click', async () => {
+  // withBusyButton returns null when the export failed; keep the dialog open to show why.
+  if (await withBusyButton(button, 'Đang xuất', exportSummary) !== null) closeCheck();
+}));
 document.querySelector('#overviewWarnings').addEventListener('click', (event) => {
   const chip = event.target.closest('[data-goto-status]');
   if (!chip) return;
@@ -1154,6 +1199,7 @@ document.querySelector('#markReviewed').addEventListener('click', async (event) 
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
   closeChanges();
+  closeCheck();
 });
 
 renderFileHistory();

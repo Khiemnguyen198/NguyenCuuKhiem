@@ -61,7 +61,7 @@ export function renderKpis(totals, { batch = false } = {}) {
   const defectRate = totals.delivered ? totals.defects / totals.delivered : 0;
   const share = (value) => `${percent(totals.contract ? value / totals.contract : 0)} hợp đồng`;
   const cards = [
-    ['SLHĐ tổng', number(totals.contract), batch ? 'các dòng booking trong đợt' : 'tổng các lô booking'],
+    ['SLHĐ tổng', number(totals.contract), batch ? 'các dòng booking trong tuần' : 'tổng các lô booking'],
     ['Đã nhận BTP', number(totals.received), share(totals.received)],
     ['Đã in (đã giao)', number(totals.delivered), `Tồn tại xưởng ${number(totals.onHand)}`],
     ['Giao đạt', number(totals.good), share(totals.good)],

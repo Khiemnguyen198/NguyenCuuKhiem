@@ -24,8 +24,8 @@ Mở `http://localhost:4173` trong trình duyệt.
    - Hàng nhận/giao có số phiếu khớp lô → gán thẳng cho lô đó.
    - Phần còn lại của mỗi Mã + Model (+ Mùa) được rót **FIFO**: lô có hạn giao sớm nhất được lấp trước, rồi trong lô chia xuống từng dòng PO theo hạn giao.
    - Hàng trong file nhận/giao không thuộc lô nào hiện ở bộ lọc **Ngoài booking**, không tính vào tổng.
-4. **Đợt booking**: chọn một tuần (theo ngày PXC CHUYỂN) để chỉ theo dõi các dòng phân bổ trong tuần đó; số nhận/giao của đợt là phần FIFO của chính các dòng đó.
-5. **Xuất file tổng hợp**: một sheet `TH` duy nhất, giống hệt sheet TH của file booking; sau các cột ngày là Nhận BTP, Đã in (giao), Còn thiếu của từng dòng và SLHĐ tổng, Lỗi, Trạng thái, Hạn còn, Nối bằng của lô.
+4. **Tuần booking**: booking luôn được theo dõi theo từng tuần (ngày PXC CHUYỂN, Thứ Hai–Chủ Nhật), mặc định là tuần hiện tại. Số lượng là phần phân bổ vào các ngày trong tuần; nhận/đã in của mỗi dòng được rót FIFO tiếp xuống từng ngày, nên tuần chỉ nhận phần của mình.
+5. **Kiểm tra file**: sau khi nhập, nút **Kiểm tra file** mở bảng tổng hợp dữ liệu chuẩn bị xuất của tuần đã chọn — nguồn file, số dòng / lô / số lượng tuần, nhận, đã in, còn thiếu, cách nối (phiếu / FIFO), các điểm cần lưu ý và xem trước các dòng. Bấm **Xuất file** trong bảng này để tải một sheet `TH` giống file booking, chỉ gồm các dòng và các ngày của tuần; sau các cột ngày là Model, Màu, SL trong tuần, Nhận BTP, Đã in (giao), Còn thiếu và các cột của lô.
 
 Nhập bằng link: khi chạy `npm run dev`, máy chủ tải file từ link (SharePoint/OneDrive tự thêm `download=1`, Google Sheets tự xuất `.xlsx`). Link SharePoint nội bộ cần đăng nhập nên không tải được: đặt quyền chia sẻ “Bất kỳ ai có link” hoặc tải file về rồi chọn file. Bản Sites chỉ đọc được link cho phép tải chéo (CORS).
 

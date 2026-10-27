@@ -45,7 +45,7 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel }) {
         <section class="delivery-summary">
           <div class="delivery-summary__heading">
             <div><p class="section-heading__overline">TIẾN ĐỘ GIAO BÁN THÀNH PHẨM</p><h2>Booking, nhận, in và giao theo từng mã hàng</h2><p id="warehouseMeta">Chưa có dữ liệu nhận/giao. Nhập ở mục Tổng quan → Nguồn dữ liệu.</p></div>
-            <button class="primary-button" data-export><i class="ph ph-microsoft-excel-logo"></i>Xuất file tổng hợp</button>
+            <button class="primary-button" data-check><i class="ph ph-list-checks"></i>Kiểm tra file</button>
           </div>
           <div class="delivery-kpis delivery-kpis--six" id="modelKpis"></div>
         </section>
@@ -62,7 +62,7 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel }) {
               <input type="search" data-column-filter="color" list="filterOptions-color" placeholder="Màu" aria-label="Lọc màu" />
               <datalist id="filterOptions-model"></datalist><datalist id="filterOptions-modelCode"></datalist><datalist id="filterOptions-color"></datalist>
             </div>
-            <select data-batch-select aria-label="Chọn đợt booking"></select>
+            <select data-batch-select aria-label="Chọn tuần booking"></select>
             <select id="customerFilter" aria-label="Lọc theo khách hàng"><option value="">Tất cả khách hàng</option></select>
             <div class="status-filters" id="statusFilters" role="group" aria-label="Lọc theo trạng thái">${STATUS_FILTERS.map(([value, label]) => `<button type="button" data-status="${value}"${value === 'open' ? ' aria-pressed="true"' : ''}>${label}<span data-status-count="${value}"></span></button>`).join('')}</div>
           </div>
@@ -75,14 +75,14 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel }) {
         <section class="delivery-summary sources-panel">
           <div class="delivery-summary__heading">
             <div><p class="section-heading__overline">NGUỒN DỮ LIỆU</p><h2>Nhập booking, nhận và giao</h2><p>Mỗi nguồn nhận file Excel hoặc link. Nhập lại bất cứ lúc nào để cập nhật số liệu.</p></div>
-            <button class="primary-button" data-export><i class="ph ph-microsoft-excel-logo"></i>Xuất file tổng hợp</button>
+            <button class="primary-button" data-check><i class="ph ph-list-checks"></i>Kiểm tra file</button>
           </div>
           <div class="source-grid">${renderSourceCards()}</div>
         </section>
         <section class="delivery-summary">
           <div class="delivery-summary__heading">
             <div><p class="section-heading__overline">KẾT QUẢ TỔNG HỢP</p><h2>Booking, nhận, in và giao</h2><p id="overviewMeta">Số liệu thực tế từ file nhận và file giao, đối chiếu với booking.</p></div>
-            <label class="batch-picker"><span>Đợt booking</span><select data-batch-select aria-label="Chọn đợt booking"></select></label>
+            <label class="batch-picker"><span>Tuần booking</span><select data-batch-select aria-label="Chọn tuần booking"></select></label>
           </div>
           <div class="delivery-kpis delivery-kpis--six" id="overviewKpis"></div>
           <div class="warning-strip" id="overviewWarnings"></div>
@@ -193,6 +193,22 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel }) {
         </aside>
       </div>
     </main>
+  </div>
+  <div class="modal" id="checkModal" aria-hidden="true">
+    <button class="modal__backdrop" data-close-check aria-label="Đóng"></button>
+    <section class="settings-dialog changes-dialog" role="dialog" aria-modal="true" aria-labelledby="checkTitle">
+      <header class="settings-dialog__header">
+        <div><p class="section-heading__overline">KIỂM TRA FILE</p><h2 id="checkTitle">Dữ liệu chuẩn bị xuất</h2></div>
+        <label class="batch-picker"><span>Tuần booking</span><select data-batch-select aria-label="Chọn tuần booking"></select></label>
+        <button class="icon-button" data-close-check aria-label="Đóng"><i class="ph ph-x"></i></button>
+      </header>
+      <div class="check-report" id="checkReport"></div>
+      <footer class="settings-dialog__footer">
+        <span class="change-reviewed" id="checkStatus"></span>
+        <button type="button" class="secondary-button" data-close-check>Đóng</button>
+        <button type="button" class="primary-button" data-export><i class="ph ph-microsoft-excel-logo"></i>Xuất file</button>
+      </footer>
+    </section>
   </div>
   <div class="modal" id="changesModal" aria-hidden="true">
     <button class="modal__backdrop" data-close-changes aria-label="Đóng"></button>

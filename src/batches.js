@@ -32,21 +32,31 @@ export function defaultWeekKey(weeks, today = new Date()) {
   return (weeks.find((week) => week.key === current) || weeks.find((week) => week.key > current) || weeks.at(-1)).key;
 }
 
-// Rows of one batch, with the quantity planned in that week and its latest return (PXI) date.
+// One row as planned in a week: the quantity of its days in that week, the FIFO figures poured
+// into those days (see lots.js), and the latest return (PXI) date among them. Null if the row
+// has nothing planned that week.
+export function batchRow(row, days, week) {
+  const inWeek = new Set(week.dayIndexes.map(String));
+  const entries = Object.entries(row.allocations || {}).filter(([index]) => inWeek.has(index));
+  if (!entries.length) return null;
+  const quantity = entries.reduce((sum, [, value]) => sum + (typeof value === 'number' ? value : 0), 0);
+  const returns = entries.map(([index]) => days[index]?.returnDate || days[index]?.date).filter(Boolean).sort();
+  const weekFifo = (field) => entries.reduce((sum, [index]) => sum + (row.dayFifo?.[index]?.[field] || 0), 0);
+  const good = Math.round(weekFifo('good'));
+  return {
+    ...row,
+    bookedLineQuantity: row.bookedLineQuantity ?? row.lineQuantity,
+    lineQuantity: Math.round(quantity),
+    outputDate: returns.at(-1) || row.outputDate,
+    allocations: Object.fromEntries(entries),
+    receivedFifo: Math.round(weekFifo('received')),
+    deliveredFifo: Math.round(weekFifo('delivered')),
+    goodFifo: good,
+    remainingFifo: Math.max(0, Math.round(quantity) - good)
+  };
+}
+
 export function batchRows(rows, days, week) {
   if (!week) return rows;
-  const inWeek = new Set(week.dayIndexes.map(String));
-  return rows.flatMap((row) => {
-    const entries = Object.entries(row.allocations || {}).filter(([index]) => inWeek.has(index));
-    if (!entries.length) return [];
-    const quantity = entries.reduce((sum, [, value]) => sum + (typeof value === 'number' ? value : 0), 0);
-    const returns = entries.map(([index]) => days[index]?.returnDate || days[index]?.date).filter(Boolean).sort();
-    return [{
-      ...row,
-      bookedLineQuantity: row.lineQuantity,
-      lineQuantity: Math.round(quantity),
-      outputDate: returns.at(-1) || row.outputDate,
-      allocations: Object.fromEntries(entries)
-    }];
-  });
+  return rows.map((row) => batchRow(row, days, week)).filter(Boolean);
 }

@@ -449,6 +449,27 @@ button.warning-chip { cursor: pointer; }
 .change-fields em, .delta-up, .delta-down { font-style: normal; font-weight: 700; }
 .delta-up { color: #08785b; }
 .delta-down { color: #b52a36; }
+.check-report { padding: 18px 22px; display: grid; gap: 14px; }
+.check-block { padding: 14px 16px; display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 8px; }
+.check-block h3 { margin: 0; display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: 14px; }
+.check-count { padding: 2px 8px; border-radius: 999px; color: #805b08; background: #fff3d1; font-size: 11px; }
+.check-sources, .check-warnings { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 12px; }
+.check-sources li { display: grid; grid-template-columns: 20px 70px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.check-sources span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #29445f; }
+.check-sources small { color: var(--muted); }
+.check-ok i { color: var(--green); }
+.check-warn i, .check-warnings i { color: #c48a00; }
+.check-bad i, .check-bad span { color: #b52a36; }
+.check-warnings li { display: flex; align-items: flex-start; gap: 8px; color: #4b3a10; }
+.check-facts { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 8px; }
+.check-facts div { padding: 11px 13px; display: grid; gap: 3px; border-right: 1px solid var(--line); }
+.check-facts div:last-child { border-right: 0; }
+.check-facts span { color: #4b6277; font-size: 10.5px; font-weight: 700; }
+.check-facts strong { color: var(--ink); font-size: 20px; letter-spacing: -.03em; }
+.check-facts small { color: var(--muted); font-size: 10px; }
+.check-note { margin: 0; color: var(--muted); font-size: 11px; }
+.check-preview td, .check-preview th { white-space: nowrap; }
+#checkModal .settings-dialog__header .batch-picker { margin-left: auto; }
 .change-reviewed { margin-right: auto; color: var(--muted); font-size: 11px; }
 .modal__backdrop { position: absolute; inset: 0; border: 0; background: rgb(5 24 43 / 58%); }
 .settings-dialog { position: relative; width: min(760px, 100%); max-height: calc(100vh - 44px); overflow: auto; border-radius: 10px; background: #fff; box-shadow: 0 25px 80px rgb(4 28 50 / 34%); }
@@ -580,4 +601,9 @@ button.warning-chip { cursor: pointer; }
 }
 @media (max-width: 1100px) {
   .source-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 900px) {
+  .check-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .check-facts div { border-bottom: 1px solid var(--line); }
+  #checkModal .settings-dialog__header { flex-wrap: wrap; }
 }

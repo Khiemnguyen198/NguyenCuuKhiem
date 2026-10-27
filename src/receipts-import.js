@@ -26,14 +26,22 @@ const COLUMNS = {
   shipped: ['TONG XUAT']
 };
 
+// The real file labels both totals "TOTAL": the first one (after BÀN) is received, the one
+// right after NGÀY XUẤT is shipped; a third TOTAL further right is the difference.
 function locateColumns(labels) {
-  return Object.fromEntries(Object.entries(COLUMNS).map(([field, aliases]) => [field, labels.findIndex((label) => aliases.includes(label))]));
+  const position = Object.fromEntries(Object.entries(COLUMNS).map(([field, aliases]) => [field, labels.findIndex((label) => aliases.includes(label))]));
+  if (position.received === -1) position.received = labels.indexOf('TOTAL');
+  if (position.shipped === -1) {
+    const shippedDate = labels.indexOf('NGAY XUAT');
+    position.shipped = shippedDate === -1 ? -1 : labels.indexOf('TOTAL', shippedDate + 1);
+  }
+  return position;
 }
 
 function findHeader(table) {
   return table.slice(0, 20).findIndex((cells) => {
     const labels = cells.map(plain);
-    return labels.includes('MA HANG') && labels.includes('TONG NHAN');
+    return labels.includes('MA HANG') && (labels.includes('TONG NHAN') || labels.includes('TOTAL'));
   });
 }
 
@@ -46,7 +54,7 @@ export function readReceiptsWorkbook(buffer) {
     const lines = readReceiptsSheet(sheet);
     if (lines.length) return { sheetName: name, lines };
   }
-  throw new Error('Không tìm thấy sheet có cột MÃ HÀNG và TỔNG NHẬN (sheet DATA) trong file nhận.');
+  throw new Error('Không tìm thấy sheet có cột MÃ HÀNG và TOTAL / TỔNG NHẬN (sheet DATA) trong file nhận.');
 }
 
 export function readReceiptsSheet(sheet) {
