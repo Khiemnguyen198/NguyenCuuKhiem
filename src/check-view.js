@@ -1,10 +1,55 @@
 import { escapeHtml, formatFileDate, formatNumber } from './format.js';
 import { STATUS_COPY, colorName } from './models-view.js';
+import { ISSUE_TYPES } from './booking-check.js';
 
 // "Kiểm tra file": what the export will contain for the selected week, before writing it.
 const number = (value) => formatNumber.format(Math.round(value || 0));
 const day = (iso) => (iso ? iso.split('-').reverse().join('/') : '—');
 const PREVIEW_ROWS = 15;
+const ISSUES_SHOWN = 200;
+const cellValue = (value) => (typeof value === 'number' ? number(value) : escapeHtml(value ?? ''));
+
+// Problems found in the booking's TH sheet, grouped by kind, with the cell, the value in the
+// file and the value it should hold. Problems touching the selected week come first.
+function renderSheetIssues(sheetCheck, booking) {
+  const cells = sheetCheck?.cells;
+  const mismatches = sheetCheck?.mismatches || [];
+  if (!cells?.checked) {
+    return '<p class="check-note">Lần nhập này chưa có kiểm tra chi tiết. Nhập lại file booking để xem lỗi theo từng ô.</p>';
+  }
+  const weekRows = new Set((booking.rows || []).map((row) => `${row.po}|${row.ref}`));
+  const weekDays = new Set((booking.days || []).map((day) => day.date));
+  const inWeek = (issue) => (issue.date ? weekDays.has(issue.date) : weekRows.has(`${issue.po}|${issue.ref}`));
+  const groups = Object.entries(ISSUE_TYPES)
+    .map(([type, info]) => ({ type, info, items: cells.issues.filter((issue) => issue.type === type) }))
+    .filter((group) => group.items.length);
+  if (mismatches.length) {
+    groups.push({
+      type: 'sheet_mismatch',
+      info: { title: 'TH lệch sheet LEADTIME', severity: 'warning' },
+      items: mismatches.map((item) => ({ cell: item.row, po: item.po, ref: item.ref, value: item.quantity, note: item.note }))
+    });
+  }
+  if (!groups.length) return '<p class="check-note check-clean"><i class="ph ph-check-circle"></i> Không phát hiện lỗi nào trong sheet TH.</p>';
+  return groups.map(({ info, items }) => {
+    const sorted = [...items].sort((a, b) => inWeek(b) - inWeek(a));
+    const weekCount = items.filter(inWeek).length;
+    const rows = sorted.slice(0, ISSUES_SHOWN).map((issue) => `<tr class="${inWeek(issue) ? 'issue-in-week' : ''}">
+      <th>${escapeHtml(issue.cell)}</th>
+      <td class="th-left">${escapeHtml(issue.po || '—')}</td>
+      <td class="th-left">${escapeHtml(issue.ref || '—')}</td>
+      <td class="color-cell" title="${escapeHtml(issue.color || '')}">${escapeHtml(colorName(issue.color) || '—')}</td>
+      <td class="issue-value">${cellValue(issue.value)}</td>
+      <td class="issue-expected">${cellValue(issue.expected)}</td>
+      <td class="th-left issue-note">${escapeHtml(issue.note || '')}${inWeek(issue) ? '<span class="result-pill result-pill--info">tuần này</span>' : ''}</td>
+    </tr>`).join('');
+    return `<details class="issue-group issue-group--${info.severity}"${weekCount ? ' open' : ''}>
+      <summary><strong>${escapeHtml(info.title)}</strong><span>${number(items.length)} ô${weekCount ? ` · ${number(weekCount)} trong tuần này` : ''}</span></summary>
+      <div class="table-wrap"><table class="delivery-table issue-table"><thead><tr><th>Ô</th><th class="th-left">PO</th><th class="th-left">Mã hàng</th><th class="th-left">Màu</th><th>Trong file</th><th>Đúng ra</th><th class="th-left">Ghi chú</th></tr></thead><tbody>${rows}</tbody></table></div>
+      ${items.length > ISSUES_SHOWN ? `<p class="check-note">Hiện ${number(ISSUES_SHOWN)} / ${number(items.length)} ô.</p>` : ''}
+    </details>`;
+  }).join('');
+}
 
 function sourceRow(title, source, required) {
   if (source?.filename) {
@@ -19,7 +64,7 @@ export function checkIssues({ booking, summary }) {
   return issues;
 }
 
-export function renderCheckReport({ booking, summary, sources, aiReport }) {
+export function renderCheckReport({ booking, summary, sources, aiReport, sheetCheck = null }) {
   const lots = summary.items.filter((item) => !item.outsideBooking);
   const { totals } = summary;
   const rows = booking.rows || [];
@@ -49,9 +94,10 @@ export function renderCheckReport({ booking, summary, sources, aiReport }) {
     totals.overdue ? `${number(totals.overdue)} lô đã quá hạn giao mà chưa giao đủ.` : null,
     totals.atRisk ? `${number(totals.atRisk)} lô tới hạn trong 3 ngày nhưng chưa nhận BTP.` : null,
     matched.none ? `${number(matched.none)} lô chưa có số nhận/giao (chưa khớp phiếu, chưa có hàng để chia FIFO).` : null,
-    ...findings.map((finding) => `File booking — ${finding.title}: ${number(finding.count)} ${finding.code === 'daily_total_mismatch' ? 'ngày' : 'dòng'} (trong cả file).`)
+    ...(sheetCheck?.cells?.checked ? [] : findings.map((finding) => `File booking — ${finding.title}: ${number(finding.count)} ${finding.code === 'daily_total_mismatch' ? 'ngày' : 'dòng'} (trong cả file).`))
   ].filter(Boolean);
 
+  const issueCount = (sheetCheck?.cells?.issues?.length || 0) + (sheetCheck?.mismatches?.length || 0);
   const lotsByKey = new Map(lots.map((item) => [item.key, item]));
   const preview = rows.slice(0, PREVIEW_ROWS).map((row) => {
     const lot = lotsByKey.get(row.lotKey);
@@ -74,6 +120,10 @@ export function renderCheckReport({ booking, summary, sources, aiReport }) {
     </section>
     <section class="check-block"><h3>Cần lưu ý ${warnings.length ? `<span class="check-count">${number(warnings.length)}</span>` : ''}</h3>
       ${warnings.length ? `<ul class="check-warnings">${warnings.map((text) => `<li><i class="ph ph-warning"></i>${escapeHtml(text)}</li>`).join('')}</ul>` : '<p class="check-note">Không có gì cần lưu ý.</p>'}
+    </section>
+    <section class="check-block"><h3>Lỗi trong sheet TH ${issueCount ? `<span class="check-count">${number(issueCount)}</span>` : ''}</h3>
+      ${renderSheetIssues(sheetCheck, booking)}
+      ${issueCount ? '<p class="check-note">Khi xuất, SLHĐ TỔNG, TỔNG NGÀY và PXI TRẢ sai năm được sửa sẵn trong sheet TH (ô đã sửa có ghi chú giá trị cũ); mọi lỗi của tuần được liệt kê ở sheet ĐỐI CHIẾU với kết quả Đã sửa / Cần kiểm tra.</p>' : ''}
     </section>
     <section class="check-block"><h3>Xem trước ${number(Math.min(PREVIEW_ROWS, rows.length))} / ${number(rows.length)} dòng sẽ xuất</h3>
       <div class="table-wrap"><table class="delivery-table check-preview"><thead><tr><th>PO</th><th class="th-left">Mã hàng</th><th class="th-left">Model</th><th class="th-left">Màu</th><th>SL tuần</th><th>Nhận BTP</th><th>Đã in (giao)</th><th>Còn thiếu</th><th>Hạn giao</th><th>Trạng thái lô</th></tr></thead>

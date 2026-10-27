@@ -158,6 +158,30 @@ const isPrivateHost = (hostname) => hostname === 'localhost'
   || /^(127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|0\.)/.test(hostname)
   || hostname.endsWith('.local') || hostname.startsWith('[');
 
+// SharePoint / OneDrive "anyone with the link" shares answer the first request with a guest
+// cookie and a redirect to the file; the file is only served when that cookie comes back.
+// fetch() does not keep cookies across redirects, so follow them by hand.
+export async function fetchWithCookies(url, { maxRedirects = 10 } = {}) {
+  const cookies = new Map();
+  let current = url;
+  for (let hop = 0; hop <= maxRedirects; hop += 1) {
+    if (isPrivateHost(new URL(current).hostname)) throw new Error('Không tải file từ địa chỉ nội bộ.');
+    const response = await fetch(current, {
+      redirect: 'manual',
+      headers: cookies.size ? { Cookie: [...cookies].map(([name, value]) => `${name}=${value}`).join('; ') } : {}
+    });
+    for (const header of response.headers.getSetCookie()) {
+      const [pair] = header.split(';');
+      const separator = pair.indexOf('=');
+      if (separator > 0) cookies.set(pair.slice(0, separator).trim(), pair.slice(separator + 1).trim());
+    }
+    const location = response.headers.get('location');
+    if (response.status < 300 || response.status >= 400 || !location) return response;
+    current = new URL(location, current).toString();
+  }
+  throw new Error('Link chuyển hướng quá nhiều lần.');
+}
+
 function bookingRowsFor(importId) {
   return database.prepare(`
     SELECT line, customer, brand, po, ref, color, season, model_code AS modelCode, planner,
@@ -513,9 +537,14 @@ export function sqliteApi() {
       server.middlewares.use('/api/booking-rows', (request, response) => {
         if (request.method !== 'GET') return sendJson(response, 405, { error: 'Method not allowed' });
         const importId = Number(new URL(request.url, 'http://local').searchParams.get('id'));
-        const imported = importId && database.prepare('SELECT id, filename FROM imports WHERE id = ?').get(importId);
+        const imported = importId && database.prepare('SELECT id, filename, sheet_check_json AS sheetCheckJson FROM imports WHERE id = ?').get(importId);
         if (!imported) return sendJson(response, 404, { error: 'Không tìm thấy lần nhập booking.' });
-        return sendJson(response, 200, { filename: imported.filename, days: bookingDaysFor(importId), rows: bookingRowsFor(importId) });
+        return sendJson(response, 200, {
+          filename: imported.filename,
+          days: bookingDaysFor(importId),
+          rows: bookingRowsFor(importId),
+          sheetCheck: imported.sheetCheckJson ? JSON.parse(imported.sheetCheckJson) : null
+        });
       });
 
       server.middlewares.use('/api/changes', async (request, response) => {
@@ -556,10 +585,10 @@ export function sqliteApi() {
           const { url } = JSON.parse(await readBody(request));
           const target = directDownloadUrl(String(url || ''));
           if (isPrivateHost(new URL(target).hostname)) return sendJson(response, 400, { error: 'Không tải file từ địa chỉ nội bộ.' });
-          const upstream = await fetch(target, { redirect: 'follow' });
+          const upstream = await fetchWithCookies(target);
           const type = upstream.headers.get('content-type') || '';
           if (upstream.status === 401 || upstream.status === 403) {
-            return sendJson(response, 403, { error: 'Link yêu cầu đăng nhập (SharePoint/OneDrive nội bộ). Hãy đặt quyền chia sẻ “Bất kỳ ai có link” hoặc tải file về rồi chọn file.' });
+            return sendJson(response, 403, { error: 'Link yêu cầu đăng nhập. Hãy kiểm tra quyền chia sẻ là “Bất kỳ ai có link” (không phải “Người trong tổ chức”), hoặc tải file về rồi chọn file.' });
           }
           if (!upstream.ok) return sendJson(response, 502, { error: `Không tải được file (HTTP ${upstream.status}).` });
           if (type.includes('text/html')) {
@@ -568,7 +597,7 @@ export function sqliteApi() {
           const bytes = Buffer.from(await upstream.arrayBuffer());
           if (bytes.length > 60_000_000) return sendJson(response, 413, { error: 'File quá lớn (trên 60 MB).' });
           const disposition = upstream.headers.get('content-disposition') || '';
-          const filename = decodeURIComponent(disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1] || disposition.match(/filename="?([^";]+)"?/i)?.[1] || new URL(target).pathname.split('/').pop() || 'file.xlsx');
+          const filename = decodeURIComponent(disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1] || disposition.match(/filename="?([^";]+)"?/i)?.[1] || new URL(upstream.url || target).pathname.split('/').pop() || 'file.xlsx');
           response.statusCode = 200;
           response.setHeader('Content-Type', 'application/octet-stream');
           response.setHeader('X-Filename', encodeURIComponent(filename));
