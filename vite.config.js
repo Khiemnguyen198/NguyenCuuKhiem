@@ -335,7 +335,7 @@ function sqliteApi() {
 }
 
 export default defineConfig({
-  base: process.env.GITHUB_ACTIONS ? '/NguyenCuuKhiem/' : '/',
+  base: '/',
   plugins: [sqliteApi()],
   server: {
     host: '0.0.0.0',

@@ -661,7 +661,7 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
       saveBrowserFiles(files);
       renderFileHistory(files);
       openPlanDetail(importId);
-      showToast(`Đã đọc ${formatNumber.format(localPayload.rowCount)} dòng. Bản web công khai không lưu SQLite.`, 'info');
+      showToast(`Đã đọc ${formatNumber.format(localPayload.rowCount)} dòng. Bản preview Sites không lưu SQLite.`, 'info');
       return;
     }
     let payload;
@@ -676,7 +676,7 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
     } catch {
       payload = localPayload;
       renderDashboard(payload);
-      showToast(`Đã đọc ${formatNumber.format(payload.rowCount)} dòng. Bản web công khai không lưu SQLite.`, 'info');
+      showToast(`Đã đọc ${formatNumber.format(payload.rowCount)} dòng. Bản preview Sites không lưu SQLite.`, 'info');
       return;
     }
     renderDashboard(payload);

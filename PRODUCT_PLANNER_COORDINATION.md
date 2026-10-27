@@ -18,7 +18,7 @@ Always pull `master` before editing. Do not treat the GPT Sites deployment as th
 - Original workbooks must never be overwritten.
 - Core calculations must be deterministic; AI must not invent minute or machine values.
 - SQLite stores normalized booking rows, import history, file history, and capacity settings when the Node development server is used.
-- GitHub Pages reads and summarizes workbooks in the browser and stores capacity settings in browser storage; it cannot run SQLite.
+- GPT Sites preview reads and summarizes workbooks in the browser and stores capacity settings in browser storage; it cannot run SQLite.
 
 ## Implemented
 
@@ -33,7 +33,6 @@ Always pull `master` before editing. Do not treat the GPT Sites deployment as th
 - Static builds persist file metadata and status history in browser storage; Node development persists events in SQLite.
 - Two-level planning flow: the Kế hoạch section lists imported plan files first, then opens the selected import's scheduling dashboard.
 - Lightweight local AI checker for missing or invalid values, date order, duplicate rows, unsupported lead times, and quantity outliers; SQLite stores one report per import.
-- GitHub Pages deployment workflow.
 - Production builds use browser storage for capacity settings and browser-only workbook import on static hosting, including GPT Sites at the root URL.
 
 ## Current limitations

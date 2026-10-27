@@ -47,6 +47,6 @@ Công suất mỗi máy = ca/ngày × phút/ca × hiệu suất × số ngày k�
 Máy cần = làm tròn lên(Tổng phút / Công suất mỗi máy)
 ```
 
-## Bản test công khai
+## Preview bằng Sites
 
-GitHub Pages chạy giao diện tĩnh và vẫn có thể đọc, tổng hợp file Excel ngay trong trình duyệt. Do Pages không chạy Node.js, dữ liệu trên bản công khai không được ghi vào SQLite; SQLite chỉ hoạt động khi chạy ứng dụng bằng `npm run dev`.
+GPT Sites chạy giao diện tĩnh và vẫn có thể đọc, tổng hợp file Excel ngay trong trình duyệt. Do bản preview không chạy Node.js, dữ liệu không được ghi vào SQLite; SQLite hoạt động khi chạy ứng dụng bằng `npm run dev`.
