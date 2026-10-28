@@ -24,7 +24,7 @@ export function buildLots(rows = []) {
   const lots = new Map();
   for (const row of rows) {
     const ticket = hasTicket(row.ticketNumber) ? String(row.ticketNumber).trim() : null;
-    const key = ticket ? `T:${ticket}` : `L:${up(row.line)}|${up(row.ref)}|${up(row.color)}|${row.inputDate || ''}`;
+    const key = ticket ? `T:${ticket}|${productOf(row.ref, modelCodeOf(row.color, row.modelCode))}` : `L:${up(row.line)}|${up(row.ref)}|${up(row.color)}|${row.inputDate || ''}`;
     const lot = lots.get(key) || {
       key, ticket, ref: row.ref, modelCode: modelCodeOf(row.color, row.modelCode), color: row.color,
       season: row.season, customer: row.customer, leadTime: row.leadTime, rows: [], contract: 0,
@@ -132,7 +132,18 @@ function pourIntoDays(row) {
 export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLines = [], today = new Date(), pinnedLots = new Set() } = {}) {
   const startOfToday = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
   const lots = buildLots(bookingRows);
-  const lotsByTicket = new Map(lots.filter((lot) => lot.ticket).map((lot) => [lot.ticket, lot]));
+  const lotsByTicket = new Map();
+  for (const lot of lots) {
+    if (!lot.ticket) continue;
+    const matches = lotsByTicket.get(lot.ticket) || [];
+    matches.push(lot);
+    lotsByTicket.set(lot.ticket, matches);
+  }
+  const directLot = (unit) => {
+    if (!unit.ticket) return null;
+    const candidates = lotsByTicket.get(unit.ticket) || [];
+    return candidates.find((lot) => lot.product === unit.product) || (candidates.length === 1 ? candidates[0] : null);
+  };
   const resolveSeason = seasonResolver(lots);
   const lotsByProductSeason = new Map();
   for (const lot of lots) {
@@ -144,6 +155,7 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
       prints: [],
       matched: isPinned ? new Set(['ghim']) : new Set(),
       ticketFields: new Set(),
+      actualDeliveryDate: null,
       pos: new Set(lot.rows.map((row) => row.po))
     });
   }
@@ -154,12 +166,13 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
     .map((group) => ({ ...itemFromDeliveries(group), ticket: group.ticket, season: group.season, product: productOf(group.model, modelCodeOf(group.color)) }));
   const pools = new Map();
   const outside = new Map();
-  const poolOf = (key) => pools.get(key) || pools.set(key, { ...ZERO(), customer: null, lastReceiptDate: null, receipts: 0 }).get(key);
+  const poolOf = (key) => pools.get(key) || pools.set(key, { ...ZERO(), customer: null, lastReceiptDate: null, actualDeliveryDate: null, receipts: 0 }).get(key);
 
   for (const unit of deliveryUnits) {
-    const direct = unit.ticket && lotsByTicket.get(unit.ticket);
+    const direct = directLot(unit);
     if (direct) {
       add(direct, unit);
+      if (unit.actualDeliveryDate && (!direct.actualDeliveryDate || unit.actualDeliveryDate > direct.actualDeliveryDate)) direct.actualDeliveryDate = unit.actualDeliveryDate;
       direct.prints.push(...unit.prints);
       direct.matched.add('phiếu');
       direct.ticketFields.add('delivered');
@@ -177,6 +190,7 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
     }
     const pool = poolOf(`${unit.product}|${season}`);
     add(pool, unit);
+    if (unit.actualDeliveryDate && (!pool.actualDeliveryDate || unit.actualDeliveryDate > pool.actualDeliveryDate)) pool.actualDeliveryDate = unit.actualDeliveryDate;
     pool.customer ??= unit.customer;
   }
 
@@ -189,7 +203,7 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
     for (const extra of outside.values()) extra.received = 0;
   }
   for (const unit of receipts) {
-    const direct = unit.ticket && lotsByTicket.get(unit.ticket);
+    const direct = directLot(unit);
     const target = direct || (() => {
       const season = resolveSeason(unit.product, unit.season);
       return season == null ? null : poolOf(`${unit.product}|${season}`);
@@ -238,6 +252,7 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
     }
     for (const lot of targets) {
       if (pool.lastReceiptDate && (!lot.lastReceiptDate || pool.lastReceiptDate > lot.lastReceiptDate)) lot.lastReceiptDate = pool.lastReceiptDate;
+      if (pool.actualDeliveryDate && (!lot.actualDeliveryDate || pool.actualDeliveryDate > lot.actualDeliveryDate)) lot.actualDeliveryDate = pool.actualDeliveryDate;
     }
     targets.at(-1).overflow = overflow;
   }
@@ -280,6 +295,7 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
     dueDate: lot.dueDate,
     firstDue: lot.firstDue,
     lastReceiptDate: lot.lastReceiptDate || null,
+    actualDeliveryDate: lot.actualDeliveryDate || null,
     pinned: Boolean(lot.pinned),
     matchedBy: [...lot.matched].join(' + ') || 'chưa có',
     sources: { booking: true, receipt: Boolean(receiptLines.length), delivery: Boolean(deliveryLines.length) },

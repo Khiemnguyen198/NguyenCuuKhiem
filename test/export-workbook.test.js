@@ -17,7 +17,11 @@ test('exports the booking in the customer TH layout', () => {
   const booking = { filename: 'b.xlsx', rows, days };
   const { items } = summarizeLots({ bookingRows: rows });
   const workbook = buildExportWorkbook({ booking, lots: items });
-  assert.deepEqual(workbook.SheetNames, ['TH', 'CAN DOI']);
+  assert.deepEqual(workbook.SheetNames, ['KE HOACH GIAO HANG', 'TH', 'CAN DOI']);
+  const deliveryPlan = XLSX.utils.sheet_to_json(workbook.Sheets['KE HOACH GIAO HANG'], { header: 1, defval: null, raw: true });
+  assert.deepEqual(deliveryPlan[0].slice(0, 11), ['MÃ HÀNG', 'MÀU', 'PO', 'SS', 'SLHĐ', 'SLHĐ TỔNG', 'SL BTP NHẬN', 'LEADTIME', 'NGÀY NHẬN', 'NGÀY GIAO HỢP ĐỒNG', 'NGÀY GIAO THỰC TẾ']);
+  assert.equal(deliveryPlan[1][9], (Date.parse('2026-11-05T00:00:00Z') - Date.UTC(1899, 11, 30)) / 86400000);
+  assert.equal(deliveryPlan[1][10], null);
   const table = XLSX.utils.sheet_to_json(workbook.Sheets.TH, { header: 1, defval: null, raw: true, blankrows: true });
 
   assert.deepEqual(table[0].slice(0, 2), ['LINE', 'CUS']);

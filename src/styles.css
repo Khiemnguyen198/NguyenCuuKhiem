@@ -196,7 +196,10 @@ button.metric { border-top: 0; border-bottom: 0; border-left: 0; text-align: lef
 .plan-table td, .plan-table th { padding: 10px 12px; }
 .plan-table thead th, .plan-table--head th { position: sticky; top: 0; z-index: 3; }
 .plan-table--head { position: sticky; top: 0; z-index: 4; }
-.plan-table tfoot td { position: sticky; bottom: 0; border-top: 1px solid var(--line); color: #102844; background: #f3f7f9; font-weight: 750; }
+.plan-delivery-table th, .plan-delivery-table td { white-space: nowrap; }
+.plan-delivery-table-scroll { max-height: 68vh; }
+.plan-date--actual { color: #7f6000; background: #fff2cc !important; font-weight: 800; }
+.plan-date--late { color: #9c0006; background: #f4cccc !important; font-weight: 800; }
 .delivery-table__left { text-align: left !important; overflow: hidden; text-overflow: ellipsis; }
 .plan-pinned { position: sticky; top: 37px; z-index: 2; border-bottom: 2px solid var(--green); background: #f2fbf7; box-shadow: 0 6px 10px -8px rgb(16 40 68 / 35%); }
 .plan-pinned__head { padding: 8px 12px; display: flex; align-items: center; gap: 8px; color: #08785b; font-size: 11px; }

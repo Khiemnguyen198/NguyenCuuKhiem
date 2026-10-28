@@ -183,3 +183,34 @@ export function renderPlanTab(tab, orders, totals = planTotals(orders)) {
     <tfoot><tr>${table.foot(totals)}</tr></tfoot>
   </table></div>`;
 }
+
+export function renderDeliveryPlanTable(orders) {
+  const rows = orders.flatMap((order) => (order.rows?.length ? order.rows.map((row) => ({ order, row })) : [{ order, row: order }]))
+    .sort((a, b) => String(a.row.outputDate || a.order.dueDate || '9999-99-99').localeCompare(String(b.row.outputDate || b.order.dueDate || '9999-99-99'))
+      || String(a.row.ref || a.order.model || '').localeCompare(String(b.row.ref || b.order.model || ''), 'vi', { numeric: true })
+      || String(a.row.po || '').localeCompare(String(b.row.po || ''), 'vi', { numeric: true }));
+  const body = rows.map(({ order, row }) => {
+    const contractDate = row.outputDate || order.dueDate;
+    const actualDate = order.actualDeliveryDate || null;
+    const warning = actualDate ? (contractDate && actualDate > contractDate ? 'Giao trễ hợp đồng' : 'Đã giao') : 'Chưa có ngày thực tế';
+    const actualClass = actualDate ? (contractDate && actualDate > contractDate ? ' plan-date--late' : ' plan-date--actual') : '';
+    return `<tr>
+      <td class="delivery-table__left"><strong>${escapeHtml(row.ref || order.model || '—')}</strong></td>
+      <td class="delivery-table__left">${escapeHtml(colorName(row.color || order.color) || row.color || order.color || '—')}</td>
+      <td class="delivery-table__left">${escapeHtml(row.po || '—')}</td>
+      <td>${escapeHtml(row.season || order.season || '—')}</td>
+      <td>${number(row.lineQuantity ?? order.contract)}</td>
+      <td>${number(order.contract)}</td>
+      <td>${number(row.receivedFifo ?? order.received)}</td>
+      <td>${escapeHtml(row.leadTime || order.leadTime || '—')}</td>
+      <td>${shortDate(row.inputDate || firstInput(order))}</td>
+      <td>${shortDate(contractDate)}</td>
+      <td class="${actualClass}">${shortDate(actualDate)}</td>
+      <td><span class="result-pill${actualDate ? '' : ' result-pill--warn'}">${warning}</span></td>
+    </tr>`;
+  }).join('') || empty(12, 'Không có dòng booking trong phạm vi đã chọn.');
+  return `<div class="plan-table-scroll plan-delivery-table-scroll"><table class="delivery-table plan-table plan-delivery-table">
+    <thead><tr><th class="th-left">Mã hàng</th><th class="th-left">Màu</th><th class="th-left">PO</th><th>SS</th><th>SLHĐ</th><th>SLHĐ tổng</th><th>SL BTP nhận</th><th>Leadtime</th><th>Ngày nhận</th><th>Ngày giao hợp đồng</th><th>Ngày giao thực tế</th><th>Cảnh báo</th></tr></thead>
+    <tbody>${body}</tbody>
+  </table></div>`;
+}

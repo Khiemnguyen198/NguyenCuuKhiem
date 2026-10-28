@@ -1,11 +1,13 @@
 import * as XLSX from 'xlsx';
 import { customerKey, productKey } from './keys.js';
+import { toIsoDate } from './booking-import.js';
 
 const SUMMARY_SHEET = 'TỔNG HỢP';
 
 const normalizeHeader = (value) => String(value ?? '').replace(/\s+/g, ' ').trim().toUpperCase();
 const toNumber = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 const text = (value) => String(value ?? '').trim();
+const ACTUAL_DELIVERY_HEADERS = ['NGÀY GIAO THỰC TẾ', 'NGÀY GIAO', 'NGÀY XUẤT', 'DATE'];
 
 // Columns are found by header text; the sheet repeats some names (opening balances), so take the first.
 const COLUMNS = {
@@ -24,6 +26,7 @@ const COLUMNS = {
   samples: 'MẪU',
   fabricShort: 'THIẾU VẢI',
   good: 'GIAO ĐẠT',
+  actualDeliveryDate: 'NGÀY GIAO THỰC TẾ',
   fullPo: 'FULL PO',
   planner: 'KẾ HOẠCH'
 };
@@ -46,6 +49,9 @@ export function readWarehouseSheet(sheet) {
   if (headerIndex === -1) throw new Error('File kho thiếu cột MÃ HÀNG hoặc TỔNG NHẬN.');
   const labels = table[headerIndex].map(normalizeHeader);
   const position = Object.fromEntries(Object.entries(COLUMNS).map(([field, label]) => [field, labels.indexOf(label)]));
+  position.actualDeliveryDate = ACTUAL_DELIVERY_HEADERS
+    .map((label) => labels.indexOf(label))
+    .find((index) => index !== -1) ?? -1;
   // The second PO column holds the production ticket (SỐ PHIẾU) shared with the booking file.
   position.ticket = position.po === -1 ? -1 : labels.indexOf('PO', position.po + 1);
   const cell = (cells, field) => (position[field] === -1 ? null : cells[position[field]]);
@@ -71,7 +77,8 @@ export function readWarehouseSheet(sheet) {
       fabricDefects: toNumber(cell(cells, 'fabricDefects')),
       samples: toNumber(cell(cells, 'samples')),
       fabricShort: toNumber(cell(cells, 'fabricShort')),
-      good: toNumber(cell(cells, 'good'))
+      good: toNumber(cell(cells, 'good')),
+      actualDeliveryDate: toIsoDate(cell(cells, 'actualDeliveryDate'))
     }));
 }
 
@@ -101,12 +108,13 @@ export function groupDeliveries(lines, bookingByKey, { keyOf = null } = {}) {
     const key = keyOf ? keyOf(line, customer) : `${customerKey(customer)}|${product}`;
     const group = groups.get(key) || {
       product, customer, model: line.model, color: line.color, season: line.season, ticket: line.ticket || '',
-      contractByPo: new Map(), contractTotal: 0, prints: new Map(), pos: new Set()
+      contractByPo: new Map(), contractTotal: 0, prints: new Map(), pos: new Set(), actualDeliveryDate: null
     };
     // -OB / -TB rows repeat the same PO for each print, so count each PO's SLHĐ once.
     const poKey = line.fullPo || line.po.replace(/-(OB|TB|[A-Z]{1,3})$/i, '');
     group.contractByPo.set(poKey, Math.max(group.contractByPo.get(poKey) || 0, line.contractQuantity));
     group.contractTotal = Math.max(group.contractTotal, line.contractTotal);
+    if (line.actualDeliveryDate && (!group.actualDeliveryDate || line.actualDeliveryDate > group.actualDeliveryDate)) group.actualDeliveryDate = line.actualDeliveryDate;
     group.pos.add(line.fullPo || line.po);
     if (line.received || line.delivered || line.good || line.print) {
       const printName = line.print || 'Không tên';
@@ -134,6 +142,7 @@ export function itemFromDeliveries(group) {
     poCount: group.pos.size,
     contract: Math.round(contractSum || group.contractTotal),
     ...slowest,
+    actualDeliveryDate: group.actualDeliveryDate,
     prints: active.length > 1 || (active.length === 1 && active[0].name !== 'Không tên') ? active : [],
     sources: { delivery: true }
   };

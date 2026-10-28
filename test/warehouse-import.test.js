@@ -21,6 +21,19 @@ test('reads the TỔNG HỢP sheet by header names', () => {
   assert.equal(lines[3].contractQuantity, 0);
 });
 
+test('reads actual delivery date when the warehouse sheet provides it', () => {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ['PO', 'MÃ HÀNG', 'MÀU', 'MÙA', 'TỔNG NHẬN', 'NGÀY GIAO THỰC TẾ'],
+    ['PO1', 'R1', 'BLUE', 'SS27', 100, 46266]
+  ]);
+  assert.equal(readWarehouseSheet(sheet)[0].actualDeliveryDate, '2026-09-01');
+});
+
+test('leaves actual delivery date empty when the warehouse sheet has no date column', () => {
+  const lines = readWarehouseSheet(sheetRows());
+  assert.equal(lines[0].actualDeliveryDate, null);
+});
+
 test('groups warehouse lines by ticket and keeps the slowest print', async () => {
   const { groupDeliveries, itemFromDeliveries } = await import('../src/warehouse-import.js');
   const lines = readWarehouseSheet(sheetRows());

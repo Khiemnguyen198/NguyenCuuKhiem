@@ -58,6 +58,22 @@ test('matches by ticket first and pours the rest FIFO by due date', () => {
   assert.deepEqual(week.map((item) => [item.contract, item.good]).sort(), [[100, 100], [30, 10]].sort());
 });
 
+test('matches a reused ticket only when its product also matches', () => {
+  const bookingRows = [
+    row('PO-A', 100, '2026-11-05', { ticketNumber: '73611' }),
+    row('PO-B', 80, '2026-11-06', { ticketNumber: '73611', ref: '999999', color: '8111111 1P RED', modelCode: '8111111' })
+  ];
+  const deliveryLines = [
+    delivery({ ticket: '73611', model: '353234', color: '9046670 1P BEA', received: 60, delivered: 60, good: 60 }),
+    delivery({ ticket: '73611', model: '999999', color: '8111111 1P RED', received: 40, delivered: 40, good: 40 })
+  ];
+  const { items } = summarizeLots({ bookingRows, deliveryLines });
+  assert.deepEqual(items.map((item) => [item.model, item.received, item.good]).sort(), [
+    ['353234', 60, 60],
+    ['999999', 40, 40]
+  ]);
+});
+
 test('keeps warehouse products without booking lots apart', () => {
   const { items, totals } = summarizeLots({ bookingRows: [row('PO1', 100, '2026-11-05')], deliveryLines: [delivery({ model: '999999', received: 40, delivered: 40, good: 40 })] });
   assert.equal(items.find((item) => item.outsideBooking).good, 40);

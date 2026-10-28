@@ -267,9 +267,51 @@ export function buildIssuesWorkbook(sheetCheck, filename = '') {
   return workbook;
 }
 
-// The export is what the planners hand over: TH and CAN DOI.
+const DELIVERY_PLAN_COLUMNS = [
+  ['MÃ HÀNG', 14], ['MÀU', 26], ['PO', 15], ['SS', 8], ['SLHĐ', 10], ['SLHĐ TỔNG', 12],
+  ['SL BTP NHẬN', 13], ['LEADTIME', 10], ['NGÀY NHẬN', 12], ['NGÀY GIAO HỢP ĐỒNG', 18],
+  ['NGÀY GIAO THỰC TẾ', 18], ['CẢNH BÁO', 24]
+];
+const actualDateStyle = { fill: { fgColor: { rgb: 'FFF2CC' } }, font: { bold: true, color: { rgb: '7F6000' } } };
+const lateDateStyle = { fill: { fgColor: { rgb: 'F4CCCC' } }, font: { bold: true, color: { rgb: '9C0006' } } };
+
+function deliveryPlanSheet({ booking, lots = [] }) {
+  const rows = booking.rows || [];
+  const lotsByKey = new Map(lots.map((lot) => [lot.key, lot]));
+  const ordered = rows.map((row, index) => ({ row, index, lot: lotsByKey.get(row.lotKey) }))
+    .sort((a, b) => String(a.row.outputDate || '9999-99-99').localeCompare(String(b.row.outputDate || '9999-99-99'))
+      || String(a.row.leadTime || '').localeCompare(String(b.row.leadTime || ''), 'vi', { numeric: true })
+      || String(a.row.ref || '').localeCompare(String(b.row.ref || ''), 'vi', { numeric: true })
+      || String(a.row.po || '').localeCompare(String(b.row.po || ''), 'vi', { numeric: true }));
+  const table = [DELIVERY_PLAN_COLUMNS.map(([title]) => title)];
+  ordered.forEach(({ row, lot }) => {
+    const actual = lot?.actualDeliveryDate || null;
+    const contract = row.outputDate || lot?.dueDate || null;
+    const warning = actual ? (contract && actual > contract ? 'Giao trễ hạn hợp đồng' : 'Đã có ngày giao thực tế') : 'Chưa có ngày giao thực tế';
+    table.push([
+      row.ref || '', colorName(row.color) || row.color || '', row.po || '', row.season || '',
+      numberCell(row.lineQuantity), numberCell(lot?.contract ?? row.contractQuantity ?? 0),
+      numberCell(row.receivedFifo ?? 0), row.leadTime || '', dateCell(row.inputDate, 'dd/mm/yyyy'),
+      dateCell(contract, 'dd/mm/yyyy'), dateCell(actual, 'dd/mm/yyyy'), warning
+    ]);
+  });
+  if (!ordered.length) table.push(['Không có dữ liệu booking trong phạm vi đã chọn.']);
+  const sheet = XLSX.utils.aoa_to_sheet(table);
+  sheet['!cols'] = DELIVERY_PLAN_COLUMNS.map(([, wch]) => ({ wch }));
+  sheet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(0, table.length - 1), c: DELIVERY_PLAN_COLUMNS.length - 1 } }) };
+  ordered.forEach(({ row, lot }, index) => {
+    const actual = lot?.actualDeliveryDate || null;
+    if (!actual) return;
+    const address = cellAddress(index + 1, 10);
+    if (sheet[address]) sheet[address].s = row.outputDate && actual > row.outputDate ? lateDateStyle : actualDateStyle;
+  });
+  return sheet;
+}
+
+// The export is what the planners hand over: the new delivery-plan sheet plus the legacy sheets.
 export function buildExportWorkbook({ booking, lots = [], sheetCheck = null }) {
   const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, deliveryPlanSheet({ booking, lots }), 'KE HOACH GIAO HANG');
   XLSX.utils.book_append_sheet(workbook, thSheet({ booking, lots, sheetCheck }), 'TH');
   XLSX.utils.book_append_sheet(workbook, canDoiSheet({ booking, lots }), 'CAN DOI');
   return workbook;

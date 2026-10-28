@@ -14,7 +14,7 @@ import { compactReceiptLines, readReceiptsWorkbook } from './receipts-import.js'
 import { restrictToRows, summarizeLots, totalsOf } from './lots.js';
 import { renderLeadtimeRows, renderWarnings } from './progress-view.js';
 import { downloadFromLink, originType, readFromPath, SOURCES, statPath } from './sources.js';
-import { filterOrders, planOrders, planTotals, renderPlanCards, renderPlanTab } from './plan-results.js';
+import { filterOrders, planOrders, planTotals, renderDeliveryPlanTable, renderPlanCards } from './plan-results.js';
 import { buildExportWorkbook, buildIssuesWorkbook, buildSlipWorkbook, downloadWorkbook, exportFilename, slipFilename, sortByUrgency } from './export-workbook.js';
 import { compactRows, diffBookingRows } from './booking-diff.js';
 import { renderChangeList, renderChangeReport, unreviewedCount } from './changes-view.js';
@@ -496,7 +496,7 @@ function renderPlanResults() {
   const shown = filterOrders(orders, planQuery, { customer: planCustomer, status: planStatus });
   const totals = planTotals(shown);
   document.querySelector('#planCards').innerHTML = renderPlanCards(totals, planTab);
-  document.querySelector('#planTable').innerHTML = renderPlanTab(planTab, shown, totals);
+  document.querySelector('#planTable').innerHTML = renderDeliveryPlanTable(shown);
   const isFiltered = Boolean(planQuery || planCustomer || planStatus);
   document.querySelector('#planResultsCount').textContent = isFiltered ? `${formatNumber.format(shown.length)} / ${formatNumber.format(orders.length)} đơn` : `${formatNumber.format(orders.length)} đơn`;
   const files = [
@@ -1081,10 +1081,8 @@ async function loadDashboard(importId = null) {
       data = fallbackDashboard;
     }
   }
-  if (!importId) {
-    latestBooking = data;
-    await Promise.all([loadLatestAiReport(), loadBookingDetail()]);
-  }
+  latestBooking = data;
+  await Promise.all([loadLatestAiReport(), loadBookingDetail()]);
   renderDashboard(data);
   renderWarehouse();
 }

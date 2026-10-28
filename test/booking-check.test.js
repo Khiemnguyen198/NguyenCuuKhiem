@@ -51,7 +51,7 @@ test('the export holds TH with computed totals and CAN DOI per lot', () => {
   const { rows, days } = readBooking(book);
   const sheetCheck = { checked: true, mismatches: [], cells: checkBookingSheet(book) };
   const out = buildExportWorkbook({ booking: { rows, days }, lots: summarizeLots({ bookingRows: rows }).items, sheetCheck });
-  assert.deepEqual(out.SheetNames, ['TH', 'CAN DOI']);
+  assert.deepEqual(out.SheetNames, ['KE HOACH GIAO HANG', 'TH', 'CAN DOI']);
   const th = out.Sheets.TH;
   assert.deepEqual([th.M6.v, th.M7.v, th.S4.v], [150, 150, 50], 'SLHĐ TỔNG is the lot total, TỔNG NGÀY recomputed');
   assert.match(th.R2.c[0].t, /sai năm/);
