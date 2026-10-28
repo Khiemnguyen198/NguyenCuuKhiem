@@ -20,6 +20,7 @@ import { compactRows, diffBookingRows } from './booking-diff.js';
 import { renderChangeList, renderChangeReport, unreviewedCount } from './changes-view.js';
 import { checkIssues, renderCheckReport } from './check-view.js';
 import { checkBookingSheet } from './booking-check.js';
+import { calendarOrders, filterCalendar, renderCalendar, renderOrderDetail, weekColumns } from './calendar-view.js';
 
 // Production builds are static (browser storage) except the desktop build (`--mode desktop`),
 // which talks to the SQLite server bundled in the app.
@@ -133,7 +134,7 @@ function renderPlanList(files = fileHistoryState) {
   document.querySelector('#planCount').textContent = formatNumber.format(plans.length);
   document.querySelector('#planFiles').innerHTML = plans.length
     ? plans.map(planRow).join('')
-    : '<div class="plan-list-empty"><i class="ph ph-calendar-x"></i><strong>Chưa có file kế hoạch</strong><span>Nhấn “Nhập file booking” để tạo kế hoạch đầu tiên.</span></div>';
+    : '<div class="plan-list-empty"><i class="ph ph-calendar-x"></i><strong>Chưa có file kế hoạch</strong><span>Nhập file booking ở Tổng quan → Nguồn dữ liệu.</span></div>';
 }
 
 function renderFileHistory(files = fileHistoryState) {
@@ -183,7 +184,6 @@ function showPage(pageName) {
   document.querySelector('#planListView').hidden = !isPlanList;
   document.querySelector('#planningView').hidden = true;
   document.querySelector('#backToPlans').hidden = true;
-  document.querySelector('#importButton').hidden = !isPlanList;
   const [eyebrow, title] = PAGE_COPY[pageName];
   document.querySelector('#pageEyebrow').textContent = eyebrow;
   document.querySelector('#pageTitle').textContent = title;
@@ -197,7 +197,6 @@ function openPlanView() {
   document.querySelector('#planListView').hidden = true;
   document.querySelector('#planningView').hidden = false;
   document.querySelector('#backToPlans').hidden = false;
-  document.querySelector('#importButton').hidden = false;
   document.querySelector('#pageEyebrow').textContent = 'KẾ HOẠCH SẢN XUẤT';
   document.querySelector('#pageTitle').textContent = 'Điều phối kế hoạch';
 }
@@ -320,6 +319,70 @@ function renderWarehouse() {
   renderOverview();
   renderPlanProgress();
   renderPlanResults();
+  renderCalendarView();
+}
+
+// Tổng quan → Kiểm tra (booking card): the selected week as a calendar, one region per order.
+let calendarOpen = readJson('planner-calendar-open', false);
+const calendarFilter = { status: 'all', query: '' };
+let calendarItems = new Map();
+const todayIso = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+};
+
+function renderCalendarView() {
+  const section = document.querySelector('#bookingCalendar');
+  section.hidden = !calendarOpen;
+  if (!calendarOpen || !lotSummary) return;
+  const week = selectedWeek();
+  const grid = document.querySelector('#calendarGrid');
+  if (!week) {
+    calendarItems = new Map();
+    document.querySelector('#calendarTitle').textContent = 'Lịch booking';
+    grid.innerHTML = '<div class="cal-empty">File booking chưa có phân bổ ngày PXC nên chưa vẽ được lịch.</div>';
+    return;
+  }
+  const weekItems = restrictToRows(lotSummary.items, (row) => batchRow(row, bookingDetail.days, week));
+  calendarItems = new Map(weekItems.map((item) => [item.key, item]));
+  const columns = weekColumns(week, bookingDetail.days);
+  const orders = calendarOrders(weekItems, columns);
+  const shownOrders = filterCalendar(orders, calendarFilter);
+  const selectedDate = dayKey === '' ? null : bookingDetail.days[Number(dayKey)]?.date;
+  grid.innerHTML = renderCalendar({ columns, orders, shownOrders, selectedDate, today: todayIso() });
+  const total = orders.reduce((sum, order) => sum + order.quantity, 0);
+  document.querySelector('#calendarTitle').textContent = week.label;
+  document.querySelector('#calendarMeta').textContent = `${shownOrders.length === orders.length ? '' : `${formatNumber.format(shownOrders.length)} / `}${formatNumber.format(orders.length)} đơn · ${formatNumber.format(Math.round(total))} sản phẩm trong tuần`;
+  document.querySelectorAll('[data-calendar-filter]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.calendarFilter === calendarFilter.status)));
+  const weeks = bookingWeeks();
+  const position = weeks.findIndex((item) => item.key === week.key);
+  document.querySelector('[data-week-step="-1"]').disabled = position <= 0;
+  document.querySelector('[data-week-step="1"]').disabled = position >= weeks.length - 1;
+}
+
+function showCalendar() {
+  calendarOpen = true;
+  writeJson('planner-calendar-open', true);
+  renderCalendarView();
+  document.querySelector('#bookingCalendar').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function openOrder(key) {
+  const lot = lotSummary?.items.find((item) => item.key === key);
+  if (!lot) return;
+  const week = selectedWeek();
+  document.querySelector('#orderTitle').textContent = `${lot.model || '—'} · ${colorName(lot.color) || ''}`;
+  document.querySelector('#orderDetail').innerHTML = renderOrderDetail({ lot, weekItem: calendarItems.get(key), days: bookingDetail.days, weekLabel: week?.label || '' });
+  const modal = document.querySelector('#orderModal');
+  modal.classList.add('modal--open');
+  modal.setAttribute('aria-hidden', 'false');
+  modal.querySelector('.icon-button').focus();
+}
+
+function closeOrder() {
+  const modal = document.querySelector('#orderModal');
+  modal.classList.remove('modal--open');
+  modal.setAttribute('aria-hidden', 'true');
 }
 
 function bookingWeeks() {
@@ -565,13 +628,13 @@ async function loadOrigins() {
   }
 }
 
-async function saveOrigin(kind, origin, mtime = null) {
-  originState[kind] = origin ? { origin, mtime } : null;
+async function saveOrigin(kind, origin, { mtime = null, hash = null } = {}) {
+  originState[kind] = origin ? { origin, mtime, hash, checkedAt: new Date().toISOString() } : null;
   if (isStaticPages) {
     writeJson('planner-origins', originState);
     return;
   }
-  const response = await fetch('/api/origins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, origin, mtime }) });
+  const response = await fetch('/api/origins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, ...(originState[kind] || { origin: null }) }) });
   if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Không lưu được nguồn dữ liệu.');
 }
 
@@ -581,14 +644,34 @@ async function readOrigin(origin) {
   return { buffer, filename, mtime: new Date().toISOString() };
 }
 
-// Reads the file from its link or path, imports it and remembers the origin for refreshes.
+// Fingerprint of a downloaded file, so a refresh that brings the same file changes nothing.
+async function contentHash(buffer) {
+  if (!globalThis.crypto?.subtle) return null;
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', buffer));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+// Reads the file from its link or path, imports it when its content changed and remembers the
+// origin for refreshes. The origin is only saved once the file was read and imported.
 async function useOrigin(kind, origin, { quiet = false } = {}) {
-  if (refreshing.has(kind)) return;
+  if (refreshing.has(kind)) {
+    if (quiet) return;
+    throw new Error(`Mục ${SOURCES[kind].title} đang được cập nhật, chờ một chút rồi thử lại.`);
+  }
   refreshing.add(kind);
   try {
     const { buffer, filename, mtime } = await readOrigin(origin);
-    await saveOrigin(kind, origin, mtime);
+    const hash = await contentHash(buffer);
+    const previous = originState[kind];
+    if (hash && previous?.origin === origin && previous.hash === hash) {
+      await saveOrigin(kind, origin, { mtime, hash });
+      if (!quiet) showToast(`${SOURCES[kind].title}: file chưa thay đổi so với lần đọc trước.`, 'info');
+      renderSources();
+      return;
+    }
     await importSource(kind, buffer, filename, origin, { quiet });
+    await saveOrigin(kind, origin, { mtime, hash });
+    renderSources();
   } finally {
     refreshing.delete(kind);
   }
@@ -603,7 +686,7 @@ async function pollOrigins() {
       if (originType(origin) === 'path') {
         const info = await statPath(origin);
         if (info.mtime !== mtime) await useOrigin(kind, origin, { quiet: true });
-      } else if (!(Date.now() - Date.parse(mtime || 0) < AUTO_REFRESH_MINUTES * 60_000)) {
+      } else if (!(Date.now() - Date.parse(originState[kind].checkedAt || mtime || 0) < AUTO_REFRESH_MINUTES * 60_000)) {
         await useOrigin(kind, origin, { quiet: true });
       }
     } catch (error) {
@@ -929,16 +1012,6 @@ async function withBusyButton(button, busyLabel, task) {
   }
 }
 
-// The Kế hoạch page keeps its own import button and opens the new plan right away.
-document.querySelector('#importButton').addEventListener('click', () => document.querySelector('#fileInput').click());
-document.querySelector('#fileInput').addEventListener('change', async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  const importId = await withBusyButton(document.querySelector('#importButton'), 'Đang xử lý', async () => importBooking(await file.arrayBuffer(), file.name));
-  event.target.value = '';
-  if (importId) openPlanDetail(importId);
-});
-
 const sourcesPanel = document.querySelector('.sources-panel');
 const sourceForms = (kind) => [...sourcesPanel.querySelectorAll(`[data-link-form="${kind}"], [data-path-form="${kind}"]`)];
 
@@ -975,6 +1048,7 @@ sourcesPanel.addEventListener('click', async (event) => {
     if (!origin) sourcesPanel.querySelector(`[data-file-input="${kind}"]`).click();
     else withBusyButton(update, 'Đang cập nhật', () => useOrigin(kind, origin));
   }
+  if (event.target.closest('[data-show-calendar]')) showCalendar();
   const remove = event.target.closest('[data-delete-source]');
   // renderSources runs after the busy state ends so an emptied card keeps Xoá disabled.
   if (remove) withBusyButton(remove, 'Đang xoá', () => deleteSource(remove.dataset.deleteSource)).then(renderSources);
@@ -1015,6 +1089,37 @@ document.querySelectorAll('[data-day-select]').forEach((select) => select.addEve
   renderWarehouse();
   renderCheck();
 }));
+document.querySelector('#closeCalendar').addEventListener('click', () => {
+  calendarOpen = false;
+  writeJson('planner-calendar-open', false);
+  renderCalendarView();
+});
+document.querySelectorAll('[data-week-step]').forEach((button) => button.addEventListener('click', () => {
+  const weeks = bookingWeeks();
+  const next = weeks[weeks.findIndex((week) => week.key === batchKey) + Number(button.dataset.weekStep)];
+  if (!next) return;
+  batchKey = next.key;
+  dayKey = '';
+  writeJson('planner-batch', batchKey);
+  writeJson('planner-day', dayKey);
+  renderWarehouse();
+  renderCheck();
+}));
+document.querySelector('#calendarFilters').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-calendar-filter]');
+  if (!button) return;
+  calendarFilter.status = button.dataset.calendarFilter;
+  renderCalendarView();
+});
+document.querySelector('#calendarSearch').addEventListener('input', (event) => {
+  calendarFilter.query = event.target.value;
+  renderCalendarView();
+});
+document.querySelector('#calendarGrid').addEventListener('click', (event) => {
+  const order = event.target.closest('[data-order]');
+  if (order) openOrder(order.dataset.order);
+});
+document.querySelectorAll('[data-close-order]').forEach((button) => button.addEventListener('click', closeOrder));
 document.querySelector('#planCards').addEventListener('click', (event) => {
   const card = event.target.closest('[data-plan-tab]');
   if (!card) return;
@@ -1154,6 +1259,7 @@ document.addEventListener('error', (event) => {
 }, true);
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
+  closeOrder();
   closeChanges();
   closeCheck();
 });

@@ -1,5 +1,6 @@
 import { STATUS_FILTERS } from './models-view.js';
 import { renderSourceCards } from './sources.js';
+import { CALENDAR_FILTERS, renderLegend } from './calendar-view.js';
 
 export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, canBrowse = false }) {
   return `
@@ -25,9 +26,7 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, ca
             <p class="eyebrow" id="pageEyebrow">KHẢ NĂNG GIAO HÀNG</p>
             <h1 id="pageTitle">Tổng quan</h1>
           </div>
-          <button class="primary-button" id="importButton" hidden><i class="ph ph-upload-simple"></i>Nhập file booking</button>
           <button class="back-button" id="backToPlans" hidden><i class="ph ph-arrow-left"></i>Danh sách kế hoạch</button>
-          <input id="fileInput" type="file" accept=".xlsx,.xls,.xlsm,.xlsb" hidden />
         </div>
         <div class="topbar__actions">
           <button class="changes-button" id="changesButton" type="button"><i class="ph ph-bell-ringing"></i><span>Thay đổi booking</span><b id="changesBadge" hidden>0</b></button>
@@ -89,6 +88,24 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, ca
             <div><p class="section-heading__overline">NGUỒN DỮ LIỆU</p><h2>Nhập booking, nhận và giao</h2><p>${isStaticPages ? 'Mỗi nguồn nhận file Excel hoặc link.' : 'Mỗi nguồn nhận file Excel, link hoặc đường dẫn trên máy chủ nội bộ (kể cả file có macro .xlsm). Link và đường dẫn được tự cập nhật khi file thay đổi.'}</p></div>
           </div>
           <div class="source-grid">${renderSourceCards({ allowPath: !isStaticPages, canBrowse })}</div>
+        </section>
+        <section class="delivery-summary booking-calendar" id="bookingCalendar" hidden>
+          <div class="delivery-summary__heading">
+            <div><p class="section-heading__overline">LỊCH BOOKING THEO TUẦN</p><h2 id="calendarTitle">Lịch booking</h2><p id="calendarMeta"></p></div>
+            <div class="calendar-actions">
+              <button type="button" class="icon-button" data-week-step="-1" aria-label="Tuần trước"><i class="ph ph-caret-left"></i></button>
+              <select data-batch-select aria-label="Chọn tuần booking"></select>
+              <button type="button" class="icon-button" data-week-step="1" aria-label="Tuần sau"><i class="ph ph-caret-right"></i></button>
+              <button type="button" class="secondary-button calendar-check" data-check><i class="ph ph-list-checks"></i>Lỗi file &amp; xuất file</button>
+              <button type="button" class="icon-button" id="closeCalendar" aria-label="Ẩn lịch"><i class="ph ph-x"></i></button>
+            </div>
+          </div>
+          <div class="model-filters calendar-filters">
+            <label class="model-search"><i class="ph ph-magnifying-glass"></i><input id="calendarSearch" type="search" placeholder="Tìm khách hàng, mã hàng, model, màu, PO…" /></label>
+            <div class="status-filters" id="calendarFilters" role="group" aria-label="Lọc đơn trên lịch">${CALENDAR_FILTERS.map(([value, label]) => `<button type="button" data-calendar-filter="${value}"${value === 'all' ? ' aria-pressed="true"' : ''}>${label}</button>`).join('')}</div>
+          </div>
+          <div id="calendarGrid"></div>
+          <div class="calendar-legend">${renderLegend()}</div>
         </section>
         <section class="delivery-summary">
           <div class="delivery-summary__heading">
@@ -173,6 +190,16 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, ca
         <button type="button" class="secondary-button" data-close-check>Đóng</button>
         <button type="button" class="primary-button" data-export><i class="ph ph-microsoft-excel-logo"></i>Xuất file</button>
       </footer>
+    </section>
+  </div>
+  <div class="modal" id="orderModal" aria-hidden="true">
+    <button class="modal__backdrop" data-close-order aria-label="Đóng"></button>
+    <section class="settings-dialog changes-dialog order-dialog" role="dialog" aria-modal="true" aria-labelledby="orderTitle">
+      <header class="settings-dialog__header">
+        <div><p class="section-heading__overline">CHI TIẾT ĐƠN HÀNG</p><h2 id="orderTitle">Đơn hàng</h2></div>
+        <button class="icon-button" data-close-order aria-label="Đóng"><i class="ph ph-x"></i></button>
+      </header>
+      <div class="order-detail" id="orderDetail"></div>
     </section>
   </div>
   <div class="modal" id="changesModal" aria-hidden="true">

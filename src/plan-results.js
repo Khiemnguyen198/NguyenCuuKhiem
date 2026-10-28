@@ -124,14 +124,14 @@ const TABLES = {
 };
 
 const COMBINED_HEAD = `${IDENTITY_HEAD}<th>SL booking</th><th>Đã nhận BTP</th><th>Đã giao BTP</th><th>Tồn BTP</th><th>Hạn giao</th><th class="th-left">Cần chú ý</th>`;
-const COMBINED_COLS = '<colgroup><col style="width:15%"><col style="width:9%"><col style="width:8%"><col style="width:13%"><col style="width:6%"><col style="width:8%"><col style="width:8%"><col style="width:8%"><col style="width:7%"><col style="width:7%"><col style="width:11%"></colgroup>';
+const COMBINED_COLS = '<colgroup><col style="width:11%"><col style="width:9%"><col style="width:8%"><col style="width:17%"><col style="width:6%"><col style="width:8%"><col style="width:8%"><col style="width:8%"><col style="width:7%"><col style="width:7%"><col style="width:11%"></colgroup>';
 const combinedRow = (order) => `<tr>${identity(order)}<td>${number(order.contract)}</td><td>${number(order.received)}</td><td>${number(order.delivered)}</td><td class="${order.onHand ? 'num--info' : ''}"><strong>${number(order.onHand)}</strong></td>${dueCell(order)}<td class="delivery-table__left"><span class="pill-stack">${pills(attentionOf(order))}</span></td></tr>`;
 
 function renderCombined(orders, totals) {
   const { done, open } = splitPinned(orders);
   const pinned = done.length
     ? `<div class="plan-pinned">
-        <div class="plan-pinned__head"><i class="ph-fill ph-push-pin"></i><strong>Đã làm xong trong tuần booking</strong><span>${number(done.length)} đơn giao đủ · luôn ghim ở đầu</span></div>
+        <div class="plan-pinned__head"><i class="ph ph-push-pin"></i><strong>Đã làm xong trong tuần booking</strong><span>${number(done.length)} đơn giao đủ · luôn ghim ở đầu</span></div>
         <div class="plan-pinned__body"><table class="delivery-table plan-table">${COMBINED_COLS}<tbody>${done.map(combinedRow).join('')}</tbody></table></div>
       </div>`
     : '<div class="plan-pinned plan-pinned--empty"><i class="ph ph-push-pin"></i>Chưa có đơn nào giao đủ trong tuần booking này.</div>';

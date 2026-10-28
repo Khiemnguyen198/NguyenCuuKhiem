@@ -51,10 +51,13 @@ const MAC_SCRIPT = `#!/bin/bash
 PID="$1"; MOUNT="$2"; NEW_APP="$3"; TARGET="$4"
 while kill -0 "$PID" 2>/dev/null; do sleep 0.5; done
 rm -rf "$TARGET.old"
-if mv "$TARGET" "$TARGET.old" && ditto "$NEW_APP" "$TARGET"; then
-  rm -rf "$TARGET.old"
-else
-  rm -rf "$TARGET"; mv "$TARGET.old" "$TARGET"
+# Only touch the installed app once it has been moved aside; if that fails, leave it as is.
+if mv "$TARGET" "$TARGET.old"; then
+  if ditto "$NEW_APP" "$TARGET"; then
+    rm -rf "$TARGET.old"
+  else
+    rm -rf "$TARGET"; mv "$TARGET.old" "$TARGET"
+  fi
 fi
 hdiutil detach "$MOUNT" -quiet -force
 xattr -dr com.apple.quarantine "$TARGET" 2>/dev/null
