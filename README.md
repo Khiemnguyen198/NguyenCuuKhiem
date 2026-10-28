@@ -33,7 +33,7 @@ Phiên bản hiện tại hiện ở cuối thanh bên (bản đầu tiên: **v0
 - Windows: bộ cài chạy ở chế độ im lặng vào đúng thư mục đã cài trước đó.
 
 Phát hành bản mới:
-1. Tăng `version` trong `package.json` (ví dụ `0.0.2`).
+1. Tăng `version` trong `package.json` và `package-lock.json`, thêm ghi chú tương ứng trong `src/release-notes.js`. Ghi chú được hiển thị ngay trên số phiên bản ở thanh bên và đọc được khi offline.
 2. `npm run dist:mac` và `npm run dist:win`.
 3. Tạo GitHub Release với tag `v0.0.2`, đính kèm `Inkava-Planner-0.0.2-arm64.dmg`, `Inkava-Planner-0.0.2-x64.dmg` và `Inkava-Planner-Setup-0.0.2.exe` (giữ nguyên tên file). Phần mô tả của Release hiện trong hộp xác nhận cập nhật.
 

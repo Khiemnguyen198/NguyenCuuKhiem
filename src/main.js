@@ -53,6 +53,21 @@ let fileHistoryState = [{
 
 document.querySelector('#app').innerHTML = appTemplate({ isStaticPages, appVersion: __APP_VERSION__, canBrowse: Boolean(window.planner?.pickExcelPath), ...workWeekLabel() });
 
+const releaseNotes = document.querySelector('#releaseNotes');
+const compactSidebar = window.matchMedia('(min-width: 761px) and (max-width: 1100px)');
+const fitReleaseNotes = () => { releaseNotes.open = !compactSidebar.matches; };
+fitReleaseNotes();
+compactSidebar.addEventListener('change', fitReleaseNotes);
+document.addEventListener('click', (event) => {
+  if (compactSidebar.matches && !releaseNotes.contains(event.target)) releaseNotes.open = false;
+});
+releaseNotes.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    releaseNotes.open = false;
+    releaseNotes.querySelector('summary').focus();
+  }
+});
+
 function renderDashboard(data) {
   dashboardState = { ...fallbackDashboard, ...data };
   document.querySelector('#filename').textContent = data.filename;

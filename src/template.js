@@ -1,6 +1,7 @@
 import { STATUS_FILTERS } from './models-view.js';
 import { renderSourceCards } from './sources.js';
 import { CALENDAR_FILTERS, renderLegend } from './calendar-view.js';
+import { renderReleaseNotes } from './release-notes.js';
 
 export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, canBrowse = false }) {
   return `
@@ -13,6 +14,7 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, ca
         <button class="nav__item" data-page="Kế hoạch"><i class="ph ph-calendar-dots"></i><span>Kế hoạch</span></button>
       </nav>
       <div class="app-update">
+        ${renderReleaseNotes(appVersion)}
         <span id="appVersion">Phiên bản v${appVersion}</span>
         <button type="button" class="app-update__button" id="updateButton" title="Kiểm tra và cài phiên bản mới" hidden><i class="ph ph-arrow-circle-up"></i><span>Cập nhật</span></button>
       </div>
