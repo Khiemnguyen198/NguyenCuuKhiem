@@ -11,6 +11,20 @@ npm run dev -- --host 0.0.0.0 --port 4173 --strictPort
 
 Mở `http://localhost:4173` trong trình duyệt.
 
+## Ứng dụng desktop (.dmg / .exe)
+
+App desktop (Electron) chứa sẵn máy chủ: SQLite, tải link SharePoint và tự cập nhật đều chạy mà không cần cài Node hay `npm run dev`. Dữ liệu lưu trong thư mục dữ liệu của người dùng (macOS: `~/Library/Application Support/inkava-production-planner/data`, Windows: `%APPDATA%\inkava-production-planner\data`).
+
+```bash
+npm run desktop     # chạy thử app desktop từ mã nguồn
+npm run dist:mac    # release/Inkava Planner-<phiên bản>-arm64.dmg (chip Apple) và …dmg (chip Intel)
+npm run dist:win    # release/Inkava Planner Setup <phiên bản>.exe (Windows x64)
+```
+
+App chưa được ký bằng chứng chỉ của Apple / Microsoft:
+- macOS: lần đầu mở bằng chuột phải → **Open**, hoặc System Settings → Privacy & Security → **Open Anyway**.
+- Windows: SmartScreen báo “Windows protected your PC” → **More info** → **Run anyway**.
+
 ## Luồng sử dụng
 
 **Nhập → Kiểm tra → Xử lý → Xuất file**

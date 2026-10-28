@@ -8,8 +8,7 @@ import { compactRows, diffBookingRows } from '../src/booking-diff.js';
 let database;
 
 // Opened on dev-server start only, so `vite build` never creates a database.
-function openDatabase() {
-  const dataDirectory = resolve('.data');
+function openDatabase(dataDirectory = resolve('.data')) {
   mkdirSync(dataDirectory, { recursive: true });
   database = new DatabaseSync(resolve(dataDirectory, 'planner.db'));
   database.exec(`
@@ -362,327 +361,333 @@ function standardValues(standard) {
   return values;
 }
 
-export function sqliteApi() {
-  return {
-    name: 'sqlite-api',
-    configureServer(server) {
-      openDatabase();
-      server.middlewares.use('/api/dashboard', (request, response) => {
-        if (request.method !== 'GET') return sendJson(response, 405, { error: 'Method not allowed' });
-        const requestedId = Number(new URL(request.url, 'http://local').searchParams.get('id')) || null;
-        sendJson(response, 200, latestDashboard(requestedId));
-      });
+// Registers every /api route on a connect-style `use(prefix, handler)`: the Vite dev server
+// in development, the desktop app's own HTTP server in the packaged app.
+export function registerApi(use, { dataDirectory } = {}) {
+  openDatabase(dataDirectory);
+  use('/api/dashboard', (request, response) => {
+    if (request.method !== 'GET') return sendJson(response, 405, { error: 'Method not allowed' });
+    const requestedId = Number(new URL(request.url, 'http://local').searchParams.get('id')) || null;
+    sendJson(response, 200, latestDashboard(requestedId));
+  });
 
-      server.middlewares.use('/api/ai-check', (request, response) => {
-        if (request.method !== 'GET') return sendJson(response, 405, { error: 'Method not allowed' });
-        const url = new URL(request.url, 'http://local');
-        const importId = Number(url.searchParams.get('id'));
-        if (!importId) return sendJson(response, 400, { error: 'Thiếu mã lần nhập.' });
-        try {
-          const report = localAiCheck(importId, url.searchParams.get('force') === '1');
-          return report
-            ? sendJson(response, 200, report)
-            : sendJson(response, 404, { error: 'Không tìm thấy dữ liệu trong SQLite.' });
-        } catch (error) {
-          return sendJson(response, 500, { error: error.message || 'AI local không thể kiểm tra dữ liệu.' });
-        }
-      });
+  use('/api/ai-check', (request, response) => {
+    if (request.method !== 'GET') return sendJson(response, 405, { error: 'Method not allowed' });
+    const url = new URL(request.url, 'http://local');
+    const importId = Number(url.searchParams.get('id'));
+    if (!importId) return sendJson(response, 400, { error: 'Thiếu mã lần nhập.' });
+    try {
+      const report = localAiCheck(importId, url.searchParams.get('force') === '1');
+      return report
+        ? sendJson(response, 200, report)
+        : sendJson(response, 404, { error: 'Không tìm thấy dữ liệu trong SQLite.' });
+    } catch (error) {
+      return sendJson(response, 500, { error: error.message || 'AI local không thể kiểm tra dữ liệu.' });
+    }
+  });
 
-      server.middlewares.use('/api/standards', async (request, response) => {
-        if (request.method === 'GET') return sendJson(response, 200, { standards: listStandards() });
+  use('/api/standards', async (request, response) => {
+    if (request.method === 'GET') return sendJson(response, 200, { standards: listStandards() });
+    try {
+      const payload = JSON.parse(await readBody(request));
+      if (request.method === 'POST') {
+        const standards = Array.isArray(payload.standards) ? payload.standards : [payload];
+        if (!standards.length) return sendJson(response, 400, { error: 'Không có định mức hợp lệ.' });
+        database.exec('BEGIN IMMEDIATE');
         try {
-          const payload = JSON.parse(await readBody(request));
-          if (request.method === 'POST') {
-            const standards = Array.isArray(payload.standards) ? payload.standards : [payload];
-            if (!standards.length) return sendJson(response, 400, { error: 'Không có định mức hợp lệ.' });
-            database.exec('BEGIN IMMEDIATE');
-            try {
-              if (payload.makeDefault !== false) database.prepare('UPDATE production_standards SET is_default = 0').run();
-              const upsert = database.prepare(`
-                INSERT INTO production_standards(
-                  name, minutes_per_impression, setup_minutes_per_po, machine_count,
-                  shifts_per_day, minutes_per_shift, efficiency_percent, planning_days,
-                  note, source, source_filename, is_default, locked
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-                ON CONFLICT(name) DO UPDATE SET
-                  minutes_per_impression = excluded.minutes_per_impression,
-                  setup_minutes_per_po = excluded.setup_minutes_per_po,
-                  machine_count = excluded.machine_count, shifts_per_day = excluded.shifts_per_day,
-                  minutes_per_shift = excluded.minutes_per_shift, efficiency_percent = excluded.efficiency_percent,
-                  planning_days = excluded.planning_days, note = excluded.note, source = excluded.source,
-                  source_filename = excluded.source_filename, is_default = excluded.is_default,
-                  locked = 1, updated_at = CURRENT_TIMESTAMP
-              `);
-              standards.forEach((standard, index) => {
-                const value = standardValues(standard);
-                upsert.run(
-                  value.name, value.minutesPerImpression, value.setupMinutesPerPo, value.machineCount,
-                  value.shiftsPerDay, value.minutesPerShift, value.efficiencyPercent, value.planningDays,
-                  value.note, payload.source || 'manual', payload.sourceFilename || null,
-                  payload.makeDefault !== false && index === 0 ? 1 : 0
-                );
-              });
-              database.exec('COMMIT');
-            } catch (error) {
-              database.exec('ROLLBACK');
-              throw error;
-            }
-            return sendJson(response, 200, { standards: listStandards() });
-          }
-          if (request.method === 'PUT') {
-            if (payload.setDefault && Number(payload.id)) {
-              database.exec('BEGIN IMMEDIATE');
-              try {
-                database.prepare('UPDATE production_standards SET is_default = 0').run();
-                database.prepare('UPDATE production_standards SET is_default = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(Number(payload.id));
-                database.exec('COMMIT');
-              } catch (error) {
-                database.exec('ROLLBACK');
-                throw error;
-              }
-              return sendJson(response, 200, { standards: listStandards() });
-            }
-            if (!payload.confirmed) return sendJson(response, 409, { error: 'Cần xác nhận mở khóa trước khi chỉnh sửa.' });
-            const value = standardValues(payload);
-            const updated = database.prepare(`
-              UPDATE production_standards SET name = ?, minutes_per_impression = ?,
-                setup_minutes_per_po = ?, machine_count = ?, shifts_per_day = ?,
-                minutes_per_shift = ?, efficiency_percent = ?, planning_days = ?, note = ?,
-                locked = 1, updated_at = CURRENT_TIMESTAMP
-              WHERE id = ?
-            `).run(
+          if (payload.makeDefault !== false) database.prepare('UPDATE production_standards SET is_default = 0').run();
+          const upsert = database.prepare(`
+            INSERT INTO production_standards(
+              name, minutes_per_impression, setup_minutes_per_po, machine_count,
+              shifts_per_day, minutes_per_shift, efficiency_percent, planning_days,
+              note, source, source_filename, is_default, locked
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            ON CONFLICT(name) DO UPDATE SET
+              minutes_per_impression = excluded.minutes_per_impression,
+              setup_minutes_per_po = excluded.setup_minutes_per_po,
+              machine_count = excluded.machine_count, shifts_per_day = excluded.shifts_per_day,
+              minutes_per_shift = excluded.minutes_per_shift, efficiency_percent = excluded.efficiency_percent,
+              planning_days = excluded.planning_days, note = excluded.note, source = excluded.source,
+              source_filename = excluded.source_filename, is_default = excluded.is_default,
+              locked = 1, updated_at = CURRENT_TIMESTAMP
+          `);
+          standards.forEach((standard, index) => {
+            const value = standardValues(standard);
+            upsert.run(
               value.name, value.minutesPerImpression, value.setupMinutesPerPo, value.machineCount,
-              value.shiftsPerDay, value.minutesPerShift, value.efficiencyPercent,
-              value.planningDays, value.note, Number(payload.id)
+              value.shiftsPerDay, value.minutesPerShift, value.efficiencyPercent, value.planningDays,
+              value.note, payload.source || 'manual', payload.sourceFilename || null,
+              payload.makeDefault !== false && index === 0 ? 1 : 0
             );
-            if (!updated.changes) return sendJson(response, 404, { error: 'Không tìm thấy định mức.' });
-            return sendJson(response, 200, { standards: listStandards() });
-          }
-          return sendJson(response, 405, { error: 'Method not allowed' });
+          });
+          database.exec('COMMIT');
         } catch (error) {
-          return sendJson(response, 400, { error: error.message || 'Không thể lưu định mức.' });
+          database.exec('ROLLBACK');
+          throw error;
         }
-      });
-
-      server.middlewares.use('/api/settings', async (request, response) => {
-        if (request.method === 'GET') return sendJson(response, 200, currentSettings());
-        if (request.method !== 'PUT') return sendJson(response, 405, { error: 'Method not allowed' });
-        try {
-          const payload = JSON.parse(await readBody(request));
-          const numbers = {
-            minutesPerImpression: payload.minutesPerImpression == null || payload.minutesPerImpression === '' ? null : Number(payload.minutesPerImpression),
-            setupMinutesPerPo: Number(payload.setupMinutesPerPo || 0),
-            machineCount: payload.machineCount == null || payload.machineCount === '' ? null : Number(payload.machineCount),
-            shiftsPerDay: Number(payload.shiftsPerDay),
-            minutesPerShift: Number(payload.minutesPerShift),
-            efficiencyPercent: Number(payload.efficiencyPercent),
-            planningDays: Number(payload.planningDays)
-          };
-          if (
-            (numbers.minutesPerImpression != null && (!Number.isFinite(numbers.minutesPerImpression) || numbers.minutesPerImpression <= 0)) ||
-            !Number.isFinite(numbers.setupMinutesPerPo) || numbers.setupMinutesPerPo < 0 ||
-            (numbers.machineCount != null && (!Number.isFinite(numbers.machineCount) || numbers.machineCount <= 0)) ||
-            !Number.isFinite(numbers.shiftsPerDay) || numbers.shiftsPerDay <= 0 ||
-            !Number.isFinite(numbers.minutesPerShift) || numbers.minutesPerShift <= 0 ||
-            !Number.isFinite(numbers.efficiencyPercent) || numbers.efficiencyPercent <= 0 ||
-            numbers.efficiencyPercent > 100 || !Number.isFinite(numbers.planningDays) || numbers.planningDays <= 0
-          ) return sendJson(response, 400, { error: 'Thông số cấu hình không hợp lệ.' });
-
-          database.prepare(`
-            UPDATE app_settings SET
-              minutes_per_impression = ?, setup_minutes_per_po = ?, machine_count = ?,
-              shifts_per_day = ?, minutes_per_shift = ?, efficiency_percent = ?, planning_days = ?,
-              updated_at = CURRENT_TIMESTAMP
-            WHERE id = 1
-          `).run(
-            numbers.minutesPerImpression, numbers.setupMinutesPerPo, numbers.machineCount,
-            numbers.shiftsPerDay, numbers.minutesPerShift, numbers.efficiencyPercent, numbers.planningDays
-          );
-          return sendJson(response, 200, currentSettings());
-        } catch (error) {
-          return sendJson(response, 500, { error: error.message || 'Không thể lưu cấu hình.' });
-        }
-      });
-
-      server.middlewares.use('/api/files', async (request, response) => {
-        const listFiles = () => database.prepare(`
-          SELECT h.id, h.import_id AS importId, h.category, h.filename, strftime('%Y-%m-%dT%H:%M:%fZ', h.created_at) AS createdAt, h.note,
-                 i.row_count AS rowCount, i.total_quantity AS totalQuantity,
-                 i.total_impressions AS totalImpressions
-          FROM file_history h
-          LEFT JOIN imports i ON i.id = h.import_id
-          ORDER BY h.created_at DESC, h.id DESC
-        `).all();
-        if (request.method === 'GET') return sendJson(response, 200, { files: listFiles() });
-        if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
-        try {
-          const { fileId, category, note } = JSON.parse(await readBody(request));
-          const file = database.prepare('SELECT * FROM file_history WHERE id = ?').get(fileId ?? null);
-          if (!file) return sendJson(response, 404, { error: 'Không tìm thấy file.' });
-          const expected = file.category === 'original' ? 'processed' : file.category === 'processed' ? 'delivered' : null;
-          if (!expected || category !== expected) return sendJson(response, 400, { error: 'Trạng thái file không hợp lệ.' });
-          database.prepare(`
-            INSERT OR IGNORE INTO file_history(import_id, category, filename, note)
-            VALUES (?, ?, ?, ?)
-          `).run(
-            file.import_id, category, file.filename,
-            typeof note === 'string' && note.trim() ? note.trim().slice(0, 300) : category === 'processed' ? 'Người dùng xác nhận đã xử lý.' : 'Người dùng xác nhận đã giao.'
-          );
-          return sendJson(response, 200, { files: listFiles() });
-        } catch (error) {
-          return sendJson(response, 400, { error: error.message || 'Không thể cập nhật file.' });
-        }
-      });
-
-      server.middlewares.use('/api/booking-rows', (request, response) => {
-        if (request.method !== 'GET') return sendJson(response, 405, { error: 'Method not allowed' });
-        const importId = Number(new URL(request.url, 'http://local').searchParams.get('id'));
-        const imported = importId && database.prepare('SELECT id, filename, sheet_check_json AS sheetCheckJson FROM imports WHERE id = ?').get(importId);
-        if (!imported) return sendJson(response, 404, { error: 'Không tìm thấy lần nhập booking.' });
-        return sendJson(response, 200, {
-          filename: imported.filename,
-          days: bookingDaysFor(importId),
-          rows: bookingRowsFor(importId),
-          sheetCheck: imported.sheetCheckJson ? JSON.parse(imported.sheetCheckJson) : null
-        });
-      });
-
-      server.middlewares.use('/api/changes', async (request, response) => {
-        if (request.method === 'GET') return sendJson(response, 200, { changes: listChanges() });
-        if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
-        try {
-          const { importId } = JSON.parse(await readBody(request));
-          const updated = database.prepare('UPDATE booking_changes SET reviewed_at = CURRENT_TIMESTAMP WHERE import_id = ? AND reviewed_at IS NULL').run(Number(importId));
-          if (!updated.changes) return sendJson(response, 404, { error: 'Không tìm thấy thay đổi cần xác nhận.' });
-          return sendJson(response, 200, { changes: listChanges() });
-        } catch (error) {
-          return sendJson(response, 400, { error: error.message || 'Không thể xác nhận thay đổi.' });
-        }
-      });
-
-      server.middlewares.use('/api/sources', async (request, response) => {
-        const kind = new URL(request.url, 'http://local').searchParams.get('kind');
-        if (!SOURCE_KINDS.has(kind)) return sendJson(response, 400, { error: 'Loại nguồn dữ liệu không hợp lệ.' });
-        if (request.method === 'GET') return sendJson(response, 200, latestSource(kind));
-        if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
-        try {
-          const payload = JSON.parse(await readBody(request));
-          if (!payload.filename || !Array.isArray(payload.lines) || !payload.lines.length) {
-            return sendJson(response, 400, { error: 'File không có dòng dữ liệu hợp lệ.' });
-          }
-          database.prepare('INSERT INTO source_snapshots(kind, filename, origin, lines_json) VALUES (?, ?, ?, ?)')
-            .run(kind, payload.filename, payload.origin || null, JSON.stringify(payload.lines));
-          return sendJson(response, 201, latestSource(kind));
-        } catch (error) {
-          return sendJson(response, 500, { error: error.message || 'Không thể lưu nguồn dữ liệu.' });
-        }
-      });
-
-      // Downloads a workbook from a share link on behalf of the browser, which CORS would block.
-      server.middlewares.use('/api/fetch-url', async (request, response) => {
-        if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
-        try {
-          const { url } = JSON.parse(await readBody(request));
-          const target = directDownloadUrl(String(url || ''));
-          if (isPrivateHost(new URL(target).hostname)) return sendJson(response, 400, { error: 'Không tải file từ địa chỉ nội bộ.' });
-          const upstream = await fetchWithCookies(target);
-          const type = upstream.headers.get('content-type') || '';
-          if (upstream.status === 401 || upstream.status === 403) {
-            return sendJson(response, 403, { error: 'Link yêu cầu đăng nhập. Hãy kiểm tra quyền chia sẻ là “Bất kỳ ai có link” (không phải “Người trong tổ chức”), hoặc tải file về rồi chọn file.' });
-          }
-          if (!upstream.ok) return sendJson(response, 502, { error: `Không tải được file (HTTP ${upstream.status}).` });
-          if (type.includes('text/html')) {
-            return sendJson(response, 415, { error: 'Link trả về trang web chứ không phải file Excel. Hãy dùng link tải trực tiếp hoặc tải file về.' });
-          }
-          const bytes = Buffer.from(await upstream.arrayBuffer());
-          if (bytes.length > 60_000_000) return sendJson(response, 413, { error: 'File quá lớn (trên 60 MB).' });
-          const disposition = upstream.headers.get('content-disposition') || '';
-          const filename = decodeURIComponent(disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1] || disposition.match(/filename="?([^";]+)"?/i)?.[1] || new URL(upstream.url || target).pathname.split('/').pop() || 'file.xlsx');
-          response.statusCode = 200;
-          response.setHeader('Content-Type', 'application/octet-stream');
-          response.setHeader('X-Filename', encodeURIComponent(filename));
-          return response.end(bytes);
-        } catch (error) {
-          return sendJson(response, 400, { error: error.message || 'Link không hợp lệ.' });
-        }
-      });
-
-      server.middlewares.use('/api/imports', async (request, response) => {
-        if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
-        try {
-          const payload = JSON.parse(await readBody(request));
-          if (!payload.filename || !Array.isArray(payload.rows) || payload.rows.length === 0) {
-            return sendJson(response, 400, { error: 'File không có dòng booking hợp lệ.' });
-          }
-
-          const totalQuantity = payload.rows.reduce((sum, row) => sum + Number(row.lineQuantity || 0), 0);
-          const totalImpressions = payload.rows.reduce(
-            (sum, row) => sum + Number(row.lineQuantity || 0) * Number(row.printCount || 0),
-            0
-          );
-
-          const previous = database.prepare('SELECT id, filename FROM imports ORDER BY id DESC LIMIT 1').get();
-          const days = Array.isArray(payload.days) ? payload.days : [];
-          const report = previous
-            ? diffBookingRows(bookingRowsFor(previous.id), compactRows(payload.rows), { previousDays: bookingDaysFor(previous.id), currentDays: days })
-            : null;
-
+        return sendJson(response, 200, { standards: listStandards() });
+      }
+      if (request.method === 'PUT') {
+        if (payload.setDefault && Number(payload.id)) {
           database.exec('BEGIN IMMEDIATE');
           try {
-            const imported = database.prepare(`
-              INSERT INTO imports(filename, row_count, total_quantity, total_impressions, sheet_check_json, days_json)
-              VALUES (?, ?, ?, ?, ?, ?)
-            `).run(payload.filename, payload.rows.length, totalQuantity, totalImpressions, payload.sheetCheck ? JSON.stringify(payload.sheetCheck) : null, JSON.stringify(days));
-
-            const insertRow = database.prepare(`
-              INSERT INTO booking_rows(
-                import_id, line, customer, brand, ref, color, po, season, line_quantity,
-                input_date, output_date, model_code, ticket_number, planner, print_count, lead_time, contract_quantity,
-                allocations_json
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `);
-            for (const row of payload.rows) {
-              insertRow.run(
-                imported.lastInsertRowid,
-                row.line ?? null,
-                row.customer ?? null,
-                row.brand ?? null,
-                row.ref ?? null,
-                row.color ?? null,
-                row.po ?? null,
-                row.season ?? null,
-                Number(row.lineQuantity || 0),
-                row.inputDate ?? null,
-                row.outputDate ?? null,
-                row.modelCode ?? null,
-                row.ticketNumber ?? null,
-                row.planner ?? null,
-                Number(row.printCount || 0),
-                row.leadTime ?? null,
-                row.contractQuantity ?? null,
-                row.allocations && Object.keys(row.allocations).length ? JSON.stringify(row.allocations) : null
-              );
-            }
-            database.prepare(`
-              INSERT OR IGNORE INTO file_history(import_id, category, filename, note)
-              VALUES (?, 'original', ?, 'File tải lên được giữ nguyên; hệ thống chỉ đọc dữ liệu.')
-            `).run(imported.lastInsertRowid, payload.filename);
-            if (report?.hasChanges) {
-              database.prepare('INSERT INTO booking_changes(import_id, previous_import_id, previous_filename, report_json) VALUES (?, ?, ?, ?)')
-                .run(imported.lastInsertRowid, previous.id, previous.filename, JSON.stringify(report));
-            }
+            database.prepare('UPDATE production_standards SET is_default = 0').run();
+            database.prepare('UPDATE production_standards SET is_default = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(Number(payload.id));
             database.exec('COMMIT');
           } catch (error) {
             database.exec('ROLLBACK');
             throw error;
           }
-          const dashboard = latestDashboard();
-          localAiCheck(dashboard.importId, true);
-          sendJson(response, 201, { ...dashboard, changes: report?.hasChanges ? listChanges()[0] : null });
-        } catch (error) {
-          sendJson(response, 500, { error: error.message || 'Không thể lưu dữ liệu.' });
+          return sendJson(response, 200, { standards: listStandards() });
         }
-      });
+        if (!payload.confirmed) return sendJson(response, 409, { error: 'Cần xác nhận mở khóa trước khi chỉnh sửa.' });
+        const value = standardValues(payload);
+        const updated = database.prepare(`
+          UPDATE production_standards SET name = ?, minutes_per_impression = ?,
+            setup_minutes_per_po = ?, machine_count = ?, shifts_per_day = ?,
+            minutes_per_shift = ?, efficiency_percent = ?, planning_days = ?, note = ?,
+            locked = 1, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run(
+          value.name, value.minutesPerImpression, value.setupMinutesPerPo, value.machineCount,
+          value.shiftsPerDay, value.minutesPerShift, value.efficiencyPercent,
+          value.planningDays, value.note, Number(payload.id)
+        );
+        if (!updated.changes) return sendJson(response, 404, { error: 'Không tìm thấy định mức.' });
+        return sendJson(response, 200, { standards: listStandards() });
+      }
+      return sendJson(response, 405, { error: 'Method not allowed' });
+    } catch (error) {
+      return sendJson(response, 400, { error: error.message || 'Không thể lưu định mức.' });
+    }
+  });
+
+  use('/api/settings', async (request, response) => {
+    if (request.method === 'GET') return sendJson(response, 200, currentSettings());
+    if (request.method !== 'PUT') return sendJson(response, 405, { error: 'Method not allowed' });
+    try {
+      const payload = JSON.parse(await readBody(request));
+      const numbers = {
+        minutesPerImpression: payload.minutesPerImpression == null || payload.minutesPerImpression === '' ? null : Number(payload.minutesPerImpression),
+        setupMinutesPerPo: Number(payload.setupMinutesPerPo || 0),
+        machineCount: payload.machineCount == null || payload.machineCount === '' ? null : Number(payload.machineCount),
+        shiftsPerDay: Number(payload.shiftsPerDay),
+        minutesPerShift: Number(payload.minutesPerShift),
+        efficiencyPercent: Number(payload.efficiencyPercent),
+        planningDays: Number(payload.planningDays)
+      };
+      if (
+        (numbers.minutesPerImpression != null && (!Number.isFinite(numbers.minutesPerImpression) || numbers.minutesPerImpression <= 0)) ||
+        !Number.isFinite(numbers.setupMinutesPerPo) || numbers.setupMinutesPerPo < 0 ||
+        (numbers.machineCount != null && (!Number.isFinite(numbers.machineCount) || numbers.machineCount <= 0)) ||
+        !Number.isFinite(numbers.shiftsPerDay) || numbers.shiftsPerDay <= 0 ||
+        !Number.isFinite(numbers.minutesPerShift) || numbers.minutesPerShift <= 0 ||
+        !Number.isFinite(numbers.efficiencyPercent) || numbers.efficiencyPercent <= 0 ||
+        numbers.efficiencyPercent > 100 || !Number.isFinite(numbers.planningDays) || numbers.planningDays <= 0
+      ) return sendJson(response, 400, { error: 'Thông số cấu hình không hợp lệ.' });
+
+      database.prepare(`
+        UPDATE app_settings SET
+          minutes_per_impression = ?, setup_minutes_per_po = ?, machine_count = ?,
+          shifts_per_day = ?, minutes_per_shift = ?, efficiency_percent = ?, planning_days = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = 1
+      `).run(
+        numbers.minutesPerImpression, numbers.setupMinutesPerPo, numbers.machineCount,
+        numbers.shiftsPerDay, numbers.minutesPerShift, numbers.efficiencyPercent, numbers.planningDays
+      );
+      return sendJson(response, 200, currentSettings());
+    } catch (error) {
+      return sendJson(response, 500, { error: error.message || 'Không thể lưu cấu hình.' });
+    }
+  });
+
+  use('/api/files', async (request, response) => {
+    const listFiles = () => database.prepare(`
+      SELECT h.id, h.import_id AS importId, h.category, h.filename, strftime('%Y-%m-%dT%H:%M:%fZ', h.created_at) AS createdAt, h.note,
+             i.row_count AS rowCount, i.total_quantity AS totalQuantity,
+             i.total_impressions AS totalImpressions
+      FROM file_history h
+      LEFT JOIN imports i ON i.id = h.import_id
+      ORDER BY h.created_at DESC, h.id DESC
+    `).all();
+    if (request.method === 'GET') return sendJson(response, 200, { files: listFiles() });
+    if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
+    try {
+      const { fileId, category, note } = JSON.parse(await readBody(request));
+      const file = database.prepare('SELECT * FROM file_history WHERE id = ?').get(fileId ?? null);
+      if (!file) return sendJson(response, 404, { error: 'Không tìm thấy file.' });
+      const expected = file.category === 'original' ? 'processed' : file.category === 'processed' ? 'delivered' : null;
+      if (!expected || category !== expected) return sendJson(response, 400, { error: 'Trạng thái file không hợp lệ.' });
+      database.prepare(`
+        INSERT OR IGNORE INTO file_history(import_id, category, filename, note)
+        VALUES (?, ?, ?, ?)
+      `).run(
+        file.import_id, category, file.filename,
+        typeof note === 'string' && note.trim() ? note.trim().slice(0, 300) : category === 'processed' ? 'Người dùng xác nhận đã xử lý.' : 'Người dùng xác nhận đã giao.'
+      );
+      return sendJson(response, 200, { files: listFiles() });
+    } catch (error) {
+      return sendJson(response, 400, { error: error.message || 'Không thể cập nhật file.' });
+    }
+  });
+
+  use('/api/booking-rows', (request, response) => {
+    if (request.method !== 'GET') return sendJson(response, 405, { error: 'Method not allowed' });
+    const importId = Number(new URL(request.url, 'http://local').searchParams.get('id'));
+    const imported = importId && database.prepare('SELECT id, filename, sheet_check_json AS sheetCheckJson FROM imports WHERE id = ?').get(importId);
+    if (!imported) return sendJson(response, 404, { error: 'Không tìm thấy lần nhập booking.' });
+    return sendJson(response, 200, {
+      filename: imported.filename,
+      days: bookingDaysFor(importId),
+      rows: bookingRowsFor(importId),
+      sheetCheck: imported.sheetCheckJson ? JSON.parse(imported.sheetCheckJson) : null
+    });
+  });
+
+  use('/api/changes', async (request, response) => {
+    if (request.method === 'GET') return sendJson(response, 200, { changes: listChanges() });
+    if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
+    try {
+      const { importId } = JSON.parse(await readBody(request));
+      const updated = database.prepare('UPDATE booking_changes SET reviewed_at = CURRENT_TIMESTAMP WHERE import_id = ? AND reviewed_at IS NULL').run(Number(importId));
+      if (!updated.changes) return sendJson(response, 404, { error: 'Không tìm thấy thay đổi cần xác nhận.' });
+      return sendJson(response, 200, { changes: listChanges() });
+    } catch (error) {
+      return sendJson(response, 400, { error: error.message || 'Không thể xác nhận thay đổi.' });
+    }
+  });
+
+  use('/api/sources', async (request, response) => {
+    const kind = new URL(request.url, 'http://local').searchParams.get('kind');
+    if (!SOURCE_KINDS.has(kind)) return sendJson(response, 400, { error: 'Loại nguồn dữ liệu không hợp lệ.' });
+    if (request.method === 'GET') return sendJson(response, 200, latestSource(kind));
+    if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
+    try {
+      const payload = JSON.parse(await readBody(request));
+      if (!payload.filename || !Array.isArray(payload.lines) || !payload.lines.length) {
+        return sendJson(response, 400, { error: 'File không có dòng dữ liệu hợp lệ.' });
+      }
+      database.prepare('INSERT INTO source_snapshots(kind, filename, origin, lines_json) VALUES (?, ?, ?, ?)')
+        .run(kind, payload.filename, payload.origin || null, JSON.stringify(payload.lines));
+      return sendJson(response, 201, latestSource(kind));
+    } catch (error) {
+      return sendJson(response, 500, { error: error.message || 'Không thể lưu nguồn dữ liệu.' });
+    }
+  });
+
+  // Downloads a workbook from a share link on behalf of the browser, which CORS would block.
+  use('/api/fetch-url', async (request, response) => {
+    if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
+    try {
+      const { url } = JSON.parse(await readBody(request));
+      const target = directDownloadUrl(String(url || ''));
+      if (isPrivateHost(new URL(target).hostname)) return sendJson(response, 400, { error: 'Không tải file từ địa chỉ nội bộ.' });
+      const upstream = await fetchWithCookies(target);
+      const type = upstream.headers.get('content-type') || '';
+      if (upstream.status === 401 || upstream.status === 403) {
+        return sendJson(response, 403, { error: 'Link yêu cầu đăng nhập. Hãy kiểm tra quyền chia sẻ là “Bất kỳ ai có link” (không phải “Người trong tổ chức”), hoặc tải file về rồi chọn file.' });
+      }
+      if (!upstream.ok) return sendJson(response, 502, { error: `Không tải được file (HTTP ${upstream.status}).` });
+      if (type.includes('text/html')) {
+        return sendJson(response, 415, { error: 'Link trả về trang web chứ không phải file Excel. Hãy dùng link tải trực tiếp hoặc tải file về.' });
+      }
+      const bytes = Buffer.from(await upstream.arrayBuffer());
+      if (bytes.length > 60_000_000) return sendJson(response, 413, { error: 'File quá lớn (trên 60 MB).' });
+      const disposition = upstream.headers.get('content-disposition') || '';
+      const filename = decodeURIComponent(disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1] || disposition.match(/filename="?([^";]+)"?/i)?.[1] || new URL(upstream.url || target).pathname.split('/').pop() || 'file.xlsx');
+      response.statusCode = 200;
+      response.setHeader('Content-Type', 'application/octet-stream');
+      response.setHeader('X-Filename', encodeURIComponent(filename));
+      return response.end(bytes);
+    } catch (error) {
+      return sendJson(response, 400, { error: error.message || 'Link không hợp lệ.' });
+    }
+  });
+
+  use('/api/imports', async (request, response) => {
+    if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
+    try {
+      const payload = JSON.parse(await readBody(request));
+      if (!payload.filename || !Array.isArray(payload.rows) || payload.rows.length === 0) {
+        return sendJson(response, 400, { error: 'File không có dòng booking hợp lệ.' });
+      }
+
+      const totalQuantity = payload.rows.reduce((sum, row) => sum + Number(row.lineQuantity || 0), 0);
+      const totalImpressions = payload.rows.reduce(
+        (sum, row) => sum + Number(row.lineQuantity || 0) * Number(row.printCount || 0),
+        0
+      );
+
+      const previous = database.prepare('SELECT id, filename FROM imports ORDER BY id DESC LIMIT 1').get();
+      const days = Array.isArray(payload.days) ? payload.days : [];
+      const report = previous
+        ? diffBookingRows(bookingRowsFor(previous.id), compactRows(payload.rows), { previousDays: bookingDaysFor(previous.id), currentDays: days })
+        : null;
+
+      database.exec('BEGIN IMMEDIATE');
+      try {
+        const imported = database.prepare(`
+          INSERT INTO imports(filename, row_count, total_quantity, total_impressions, sheet_check_json, days_json)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(payload.filename, payload.rows.length, totalQuantity, totalImpressions, payload.sheetCheck ? JSON.stringify(payload.sheetCheck) : null, JSON.stringify(days));
+
+        const insertRow = database.prepare(`
+          INSERT INTO booking_rows(
+            import_id, line, customer, brand, ref, color, po, season, line_quantity,
+            input_date, output_date, model_code, ticket_number, planner, print_count, lead_time, contract_quantity,
+            allocations_json
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const row of payload.rows) {
+          insertRow.run(
+            imported.lastInsertRowid,
+            row.line ?? null,
+            row.customer ?? null,
+            row.brand ?? null,
+            row.ref ?? null,
+            row.color ?? null,
+            row.po ?? null,
+            row.season ?? null,
+            Number(row.lineQuantity || 0),
+            row.inputDate ?? null,
+            row.outputDate ?? null,
+            row.modelCode ?? null,
+            row.ticketNumber ?? null,
+            row.planner ?? null,
+            Number(row.printCount || 0),
+            row.leadTime ?? null,
+            row.contractQuantity ?? null,
+            row.allocations && Object.keys(row.allocations).length ? JSON.stringify(row.allocations) : null
+          );
+        }
+        database.prepare(`
+          INSERT OR IGNORE INTO file_history(import_id, category, filename, note)
+          VALUES (?, 'original', ?, 'File tải lên được giữ nguyên; hệ thống chỉ đọc dữ liệu.')
+        `).run(imported.lastInsertRowid, payload.filename);
+        if (report?.hasChanges) {
+          database.prepare('INSERT INTO booking_changes(import_id, previous_import_id, previous_filename, report_json) VALUES (?, ?, ?, ?)')
+            .run(imported.lastInsertRowid, previous.id, previous.filename, JSON.stringify(report));
+        }
+        database.exec('COMMIT');
+      } catch (error) {
+        database.exec('ROLLBACK');
+        throw error;
+      }
+      const dashboard = latestDashboard();
+      localAiCheck(dashboard.importId, true);
+      sendJson(response, 201, { ...dashboard, changes: report?.hasChanges ? listChanges()[0] : null });
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || 'Không thể lưu dữ liệu.' });
+    }
+  });
+}
+
+export function sqliteApi() {
+  return {
+    name: 'sqlite-api',
+    configureServer(server) {
+      registerApi((prefix, handler) => server.middlewares.use(prefix, handler));
     }
   };
 }
