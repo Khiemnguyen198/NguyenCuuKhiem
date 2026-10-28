@@ -15,7 +15,7 @@ import { compactReceiptLines, readReceiptsWorkbook } from './receipts-import.js'
 import { restrictToRows, summarizeLots, totalsOf } from './lots.js';
 import { renderLeadtimeRows, renderWarnings } from './progress-view.js';
 import { downloadFromLink } from './sources.js';
-import { buildExportWorkbook, downloadWorkbook, exportFilename, sortByUrgency } from './export-workbook.js';
+import { buildExportWorkbook, buildIssuesWorkbook, downloadWorkbook, exportFilename, sortByUrgency } from './export-workbook.js';
 import { compactRows, diffBookingRows } from './booking-diff.js';
 import { renderChangeList, renderChangeReport, unreviewedCount } from './changes-view.js';
 import { checkIssues, renderCheckReport } from './check-view.js';
@@ -1036,6 +1036,21 @@ document.querySelectorAll('[data-batch-select]').forEach((select) => select.addE
   renderCheck();
 }));
 document.querySelectorAll('[data-check]').forEach((button) => button.addEventListener('click', openCheck));
+const checkReport = document.querySelector('#checkReport');
+checkReport.addEventListener('input', (event) => {
+  if (!event.target.matches('[data-issue-search]')) return;
+  const query = event.target.value.trim().toLocaleLowerCase('vi-VN');
+  checkReport.querySelectorAll('[data-issue-text]').forEach((item) => { item.hidden = Boolean(query) && !item.dataset.issueText.includes(query); });
+  // Open the groups that still have matches so the results are visible.
+  checkReport.querySelectorAll('.issue-group').forEach((group) => {
+    if (query) group.open = Boolean(group.querySelector('[data-issue-text]:not([hidden])'));
+  });
+});
+checkReport.addEventListener('click', (event) => {
+  if (!event.target.closest('[data-download-issues]')) return;
+  const name = (latestBooking.filename || 'booking').replace(/\.[^.]+$/, '');
+  downloadWorkbook(buildIssuesWorkbook(bookingDetail.sheetCheck, latestBooking.filename), `LOI_FILE_BOOKING_${name}.xlsx`);
+});
 document.querySelectorAll('[data-close-check]').forEach((button) => button.addEventListener('click', closeCheck));
 document.querySelectorAll('[data-export]').forEach((button) => button.addEventListener('click', async () => {
   // withBusyButton returns null when the export failed; keep the dialog open to show why.

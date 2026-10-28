@@ -17,7 +17,7 @@ test('exports the booking in the customer TH layout', () => {
   const booking = { filename: 'b.xlsx', rows, days };
   const { items } = summarizeLots({ bookingRows: rows });
   const workbook = buildExportWorkbook({ booking, lots: items });
-  assert.deepEqual(workbook.SheetNames, ['TH']);
+  assert.deepEqual(workbook.SheetNames, ['TH', 'CAN DOI']);
   const table = XLSX.utils.sheet_to_json(workbook.Sheets.TH, { header: 1, defval: null, raw: true, blankrows: true });
 
   assert.deepEqual(table[0].slice(0, 2), ['LINE', 'CUS']);

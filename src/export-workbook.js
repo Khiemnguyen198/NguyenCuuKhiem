@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import { STATUS_COPY, colorName } from './models-view.js';
 import { dailyLoad } from './booking-import.js';
-import { ISSUE_TYPES } from './booking-check.js';
+import { ISSUE_GROUPS, sheetIssueList } from './check-view.js';
 
 const pad = (value) => String(value).padStart(2, '0');
 
@@ -32,7 +32,8 @@ const TH_COLUMNS = [
   ['LINE QTY', (row) => numberCell(row.bookedLineQuantity ?? row.lineQuantity), 9],
   [' INPUT ', (row) => dateCell(row.inputDate, 'd-mmm'), 8], [' OUTPUT ', (row) => dateCell(row.outputDate, 'd-mmm'), 8],
   [' MODEL CODE ', (row) => row.modelCode, 10], [' SỐ PHIẾU ', (row) => row.ticketNumber, 9],
-  [' SLHĐ TỔNG ', (row) => numberCell(row.contractQuantity ?? 0), 10], ['KẾ HOẠCH', (row) => row.planner, 9],
+  // SLHĐ TỔNG is the lot's total LINE QTY (same SỐ PHIẾU, or LINE + REF + COLOR + INPUT).
+  [' SLHĐ TỔNG ', (row, lot) => numberCell(lot?.contract ?? row.contractQuantity ?? 0), 10], ['KẾ HOẠCH', (row) => row.planner, 9],
   ['HÌNH IN', (row) => numberCell(row.printCount, '0'), 7], ['Leadtime', (row) => row.leadTime, 8]
 ];
 // Appended after the daily plan so columns A onward stay exactly as in TH. Row figures come
@@ -52,12 +53,6 @@ const PROGRESS_COLUMNS = [
   ['Nối bằng', (row, lot) => lot?.matchedBy ?? '', 11]
 ];
 
-// Which TH column a row-level problem lives in (by header), for the exported cell address.
-const ISSUE_COLUMN = {
-  contract_missing: ' SLHĐ TỔNG ', contract_wrong: ' SLHĐ TỔNG ', output_before_input: ' OUTPUT ', output_sunday: ' OUTPUT ',
-  missing_po: 'PO', bad_quantity: 'LINE QTY', bad_print_count: 'HÌNH IN', bad_lead_time: 'Leadtime'
-};
-const rowKey = (row) => [row.line, row.po, row.ref, row.color].map((value) => String(value ?? '').trim()).join('|');
 const addYear = (iso) => `${Number(iso.slice(0, 4)) + 1}${iso.slice(4)}`;
 const daysBetween = (from, to) => (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000;
 const cellAddress = (row, column) => XLSX.utils.encode_cell({ r: row, c: column });
@@ -67,25 +62,13 @@ const isSunday = (iso) => new Date(`${iso}T00:00:00Z`).getUTCDay() === 0;
 // The customer's TH layout: header on row 1 and again on row 5, PXI TRẢ / TỔNG TUẦN /
 // TỔNG NGÀY on rows 2–4 under the PXC CHUYỂN label, data from row 6. TỔNG TUẦN is the
 // Monday–Saturday sum, merged across those days.
-// Builds TH and, alongside, the list of problems in its scope: fixable ones are corrected in
-// the sheet (with a cell comment holding the old value), the rest are flagged for review.
+// TH in the customer's layout: header on rows 1 and 5, PXI TRẢ / TỔNG TUẦN / TỔNG NGÀY on rows
+// 2–4 under the PXC CHUYỂN label, data from row 6. Totals are computed here, not copied; a PXI
+// date typed with the wrong year is corrected with a comment holding the old value.
 function thSheet({ booking, lots, sheetCheck }) {
   const { rows = [], days = [] } = booking;
-  const issues = sheetCheck?.cells?.issues || [];
-  const rowIssues = new Map();
-  for (const issue of issues.filter((item) => !item.date)) {
-    const key = rowKey(issue);
-    const bySheetRow = rowIssues.get(key) || new Map();
-    bySheetRow.set(issue.row, [...(bySheetRow.get(issue.row) || []), issue]);
-    rowIssues.set(key, bySheetRow);
-  }
-  const dayIssues = new Map(days.map((day) => [day.date, issues.filter((issue) => issue.date === day.date)]));
-  const records = [];
+  const pxiIssues = new Map((sheetCheck?.cells?.issues || []).filter((issue) => issue.type === 'return_before_pickup').map((issue) => [issue.date, issue]));
   const comments = [];
-  const record = (issue, exportCell, exportValue, fixed, note = issue.note) => records.push({
-    title: ISSUE_TYPES[issue.type]?.title || issue.type, bookingCell: issue.cell, exportCell, po: issue.po, ref: issue.ref, color: issue.color,
-    before: issue.value, after: exportValue, fixed, note
-  });
   const lotsByKey = new Map(lots.map((lot) => [lot.key, lot]));
   const progress = PROGRESS_COLUMNS.filter((column) => booking.batch || !column[3]);
   const labelColumn = TH_COLUMNS.length;
@@ -116,52 +99,22 @@ function thSheet({ booking, lots, sheetCheck }) {
   });
   for (const span of merges) table[2][firstDay + span.start] = numberCell(span.total);
   days.forEach((day, index) => {
-    const column = firstDay + index;
-    for (const issue of dayIssues.get(day.date) || []) {
-      if (issue.type === 'daily_total_wrong') {
-        comments.push([3, column, `Đã sửa: file booking ghi ${issue.value}, tính lại Σ HÌNH IN × phân bổ = ${Math.round(load[index])}`]);
-        record(issue, cellAddress(3, column), Math.round(load[index]), true);
-      } else if (issue.type === 'return_before_pickup') {
-        // Usually a year typed wrong (02/01/2026 for 02/01/2027): fix only when that lands just after PXC.
-        const candidate = addYear(day.returnDate);
-        const plausible = daysBetween(day.date, candidate) >= 0 && daysBetween(day.date, candidate) <= 14;
-        if (plausible) {
-          table[1][column] = dateCell(candidate, 'dd/mm');
-          comments.push([1, column, `Đã sửa: file booking ghi ${issue.value} (sai năm)`]);
-        }
-        record(issue, cellAddress(1, column), plausible ? `${candidate.slice(8, 10)}/${candidate.slice(5, 7)}/${candidate.slice(0, 4)}` : issue.value, plausible);
-      }
-    }
+    const issue = pxiIssues.get(day.date);
+    if (!issue) return;
+    // Usually a year typed wrong (02/01/2026 for 02/01/2027): fix only when that lands just after PXC.
+    const candidate = addYear(day.returnDate);
+    const gap = daysBetween(day.date, candidate);
+    if (gap < 0 || gap > 14) return;
+    table[1][firstDay + index] = dateCell(candidate, 'dd/mm');
+    comments.push([1, firstDay + index, `Đã sửa: file booking ghi ${issue.value} (sai năm)`]);
   });
-  const columnOf = Object.fromEntries(TH_COLUMNS.map(([title], index) => [title, index]));
-  const usedSheetRows = new Map();
   let previousLeadTime = null;
   for (const row of rows) {
     // TH leaves one empty row between lead-time groups.
     if (previousLeadTime != null && row.leadTime !== previousLeadTime) table.push([]);
     previousLeadTime = row.leadTime;
     const lot = lotsByKey.get(row.lotKey);
-    const exportRow = table.length;
-    const cells = TH_COLUMNS.map(([, read]) => read(row));
-    // Rows repeat (duplicates), so each export row takes the next sheet row of its key.
-    const bySheetRow = rowIssues.get(rowKey(row));
-    const used = usedSheetRows.get(rowKey(row)) || new Set();
-    const sheetRow = bySheetRow && [...bySheetRow.keys()].find((rowNumber) => !used.has(rowNumber));
-    if (sheetRow != null) {
-      used.add(sheetRow);
-      usedSheetRows.set(rowKey(row), used);
-      for (const issue of bySheetRow.get(sheetRow)) {
-        const column = columnOf[ISSUE_COLUMN[issue.type]];
-        const exportCell = column == null ? `dòng ${exportRow + 1}` : cellAddress(exportRow, column);
-        if (issue.type === 'contract_missing' || issue.type === 'contract_wrong') {
-          cells[column] = numberCell(issue.expected);
-          comments.push([exportRow, column, `Đã sửa: file booking ghi ${issue.value}`]);
-          record(issue, exportCell, issue.expected, true);
-        } else {
-          record(issue, exportCell, issue.value, false);
-        }
-      }
-    }
+    const cells = TH_COLUMNS.map(([, read]) => read(row, lot));
     table.push([
       ...cells,
       null,
@@ -185,36 +138,138 @@ function thSheet({ booking, lots, sheetCheck }) {
     sheet[address].c = [{ a: 'Kế hoạch', t: textValue }];
     sheet[address].c.hidden = true;
   }
-  // TH vs LEADTIME differences of the exported POs have no single cell to fix.
-  const exportedPos = new Set(rows.map((row) => row.po));
-  for (const item of sheetCheck?.mismatches || []) {
-    if (!exportedPos.has(item.po)) continue;
-    records.push({ title: 'TH lệch sheet LEADTIME', bookingCell: item.row, exportCell: '', po: item.po, ref: item.ref, color: '', before: item.quantity, after: item.quantity, fixed: false, note: item.note });
-  }
-  return { sheet, records };
-}
-
-// ĐỐI CHIẾU: every problem in the exported scope, side by side with what the export holds.
-function reconciliationSheet(records) {
-  const rows = [['Lỗi', 'Ô file booking (TH)', 'Ô file xuất (TH)', 'PO', 'Mã hàng', 'Màu', 'Giá trị file booking', 'Giá trị file xuất', 'Kết quả', 'Ghi chú']];
-  const ordered = [...records].sort((a, b) => Number(b.fixed) - Number(a.fixed));
-  for (const item of ordered) {
-    rows.push([item.title, item.bookingCell, item.exportCell, item.po || '', item.ref || '', item.color || '', item.before ?? '', item.after ?? '', item.fixed ? 'Đã sửa' : 'Cần kiểm tra', item.note || '']);
-  }
-  if (!records.length) rows.push(['Không có lỗi nào trong phạm vi xuất.']);
-  const sheet = XLSX.utils.aoa_to_sheet(rows);
-  sheet['!cols'] = [24, 16, 14, 14, 10, 30, 18, 18, 13, 60].map((wch) => ({ wch }));
-  sheet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length - 1, c: 9 } }) };
   return sheet;
 }
 
-// TH in the customer's layout (with fixable problems corrected), plus ĐỐI CHIẾU when the
-// booking had problems in the exported scope.
+const viDay = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '');
+
+function isoWeek(iso) {
+  const date = new Date(`${iso}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + 3 - ((date.getUTCDay() + 6) % 7));
+  const firstThursday = new Date(Date.UTC(date.getUTCFullYear(), 0, 4));
+  return 1 + Math.round(((date - firstThursday) / 86_400_000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7);
+}
+
+// CAN DOI, as the planners build it from TH: one row per lot (REF · MODEL CODE · Mùa ·
+// SLHĐ TỔNG · HÌNH IN · Leadtime), the week's quantity per day, and the receiving / printing /
+// delivery figures — filled here from the receiving and warehouse files instead of by hand.
+const CAN_DOI_COLUMNS = [
+  ['', 18], ['REF', 10], ['MODEL CODE', 11], ['Mùa', 7], ['SLHĐ TỔNG', 10], ['HÌNH IN', 8], [' Leadtime ', 9],
+  ['W', 9], ['Ngày nhận', 10], ['Thực Nhận', 10], ['Đã In', 10], ['Đã Giao', 10], ['GAP', 10]
+];
+
+function canDoiSheet({ booking, lots }) {
+  const { rows = [] } = booking;
+  // Monday–Saturday like the planners' sheet; a Sunday column stays only if something is planned on it.
+  const kept = (booking.days || [])
+    .map((day, index) => ({ day, index }))
+    .filter(({ day, index }) => !isSunday(day.date) || rows.some((row) => typeof row.allocations?.[index] === 'number'));
+  const days = kept.map(({ day }) => day);
+  const lotsByKey = new Map(lots.map((lot) => [lot.key, lot]));
+  const groups = new Map();
+  for (const row of rows) {
+    const key = [row.lotKey, row.printCount, row.leadTime].join('|');
+    const group = groups.get(key) || { row, lot: lotsByKey.get(row.lotKey), days: days.map(() => 0), received: 0, delivered: 0, good: 0 };
+    kept.forEach(({ index }, position) => {
+      const value = row.allocations?.[index];
+      if (typeof value === 'number') group.days[position] += value;
+    });
+    group.received += row.receivedFifo || 0;
+    group.delivered += row.deliveredFifo || 0;
+    group.good += row.goodFifo || 0;
+    groups.set(key, group);
+  }
+  const ordered = [...groups.values()].sort((a, b) => String(a.row.ref).localeCompare(String(b.row.ref), 'vi', { numeric: true })
+    || String(a.row.modelCode).localeCompare(String(b.row.modelCode), 'vi', { numeric: true })
+    || String(a.row.season).localeCompare(String(b.row.season)));
+
+  const first = 4;
+  const last = Math.max(first, first + ordered.length - 1);
+  const firstDay = CAN_DOI_COLUMNS.length;
+  const letter = (column) => XLSX.utils.encode_col(column);
+  const formulaCell = (formula, value, format = '#,##0') => ({ t: 'n', v: value, f: formula, z: format });
+  const weekLabel = days.length ? `W${isoWeek(days[0].date)}` : 'W';
+  const header = [...CAN_DOI_COLUMNS.map(([title]) => (title === 'W' ? weekLabel : title)), ...days.map((day) => `Sum of ${viDay(day.date).slice(0, 5)}`)];
+  const sum = (field) => ordered.reduce((total, group) => total + group[field], 0);
+  const column = (name) => CAN_DOI_COLUMNS.findIndex(([title]) => title === name);
+  const totalsRow = Array(header.length).fill(null);
+  for (const name of ['Thực Nhận', 'Đã In', 'Đã Giao', 'GAP']) {
+    const index = column(name);
+    const value = name === 'GAP' ? sum('good') - ordered.reduce((total, group) => total + group.days.reduce((a, b) => a + b, 0), 0) : sum({ 'Thực Nhận': 'received', 'Đã In': 'delivered', 'Đã Giao': 'good' }[name]);
+    totalsRow[index] = formulaCell(`SUBTOTAL(9,${letter(index)}${first + 1}:${letter(index)}${last + 1})`, Math.round(value));
+  }
+  days.forEach((day, index) => {
+    const dayColumn = letter(firstDay + index);
+    const load = ordered.reduce((total, group) => total + group.days[index] * (Number(group.row.printCount) || 0), 0);
+    totalsRow[firstDay + index] = formulaCell(`SUMPRODUCT($F$${first + 1}:$F$${last + 1},${dayColumn}${first + 1}:${dayColumn}${last + 1})`, Math.round(load));
+  });
+
+  const table = [[], [], totalsRow, header];
+  ordered.forEach((group, offset) => {
+    const excelRow = first + offset + 1;
+    const weekTotal = group.days.reduce((a, b) => a + b, 0);
+    const contract = group.lot?.contract ?? group.row.contractQuantity ?? 0;
+    table.push([
+      `${group.row.ref}${group.row.modelCode}${contract}`,
+      group.row.ref, group.row.modelCode, group.row.season, numberCell(contract), numberCell(Number(group.row.printCount) || 0, '0'), group.row.leadTime,
+      formulaCell(`SUM(${letter(firstDay)}${excelRow}:${letter(firstDay + Math.max(days.length, 1) - 1)}${excelRow})`, Math.round(weekTotal)),
+      dateCell(group.lot?.lastReceiptDate, 'dd/mm'),
+      numberCell(Math.round(group.received)), numberCell(Math.round(group.delivered)), numberCell(Math.round(group.good)),
+      formulaCell(`L${excelRow}-H${excelRow}`, Math.round(group.good - weekTotal)),
+      ...group.days.map((value) => (value ? numberCell(Math.round(value * 100) / 100) : null))
+    ]);
+  });
+  if (!ordered.length) table.push(['Không có lô nào trong tuần đã chọn.']);
+  const sheet = XLSX.utils.aoa_to_sheet(table);
+  sheet['!cols'] = [...CAN_DOI_COLUMNS.map(([, wch]) => ({ wch })), ...days.map(() => ({ wch: 11 }))];
+  sheet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 3, c: 1 }, e: { r: Math.max(3, table.length - 1), c: header.length - 1 } }) };
+  return sheet;
+}
+
+const ISSUE_COLUMNS = [
+  ['STT', 5], ['Mức độ', 9], ['Loại lỗi', 26], ['Ô (sheet TH)', 12], ['LINE', 6], ['CUS', 12], ['PO', 14], ['SỐ PHIẾU', 9],
+  ['REF', 10], ['COLOR', 30], ['LINE QTY', 9], ['INPUT', 11], ['OUTPUT', 11], ['Giá trị trong file', 22],
+  ['Đúng ra / đề xuất', 22], ['Khi xuất file', 16], ['Lý do chi tiết', 90], ['Đề xuất', 45], ['Cách kiểm tra', 45]
+];
+
+// Every problem of the booking file for the planner to work through: a summary by kind, then
+// one row per problem with the full row context, values, reasoning and where to look.
+export function buildIssuesWorkbook(sheetCheck, filename = '') {
+  const issues = sheetIssueList(sheetCheck);
+  const groups = Object.entries(ISSUE_GROUPS).map(([type, info]) => ({ info, items: issues.filter((item) => item.type === type) })).filter((group) => group.items.length);
+  const severity = { danger: 'Cao', warning: 'Trung bình', info: 'Thấp' };
+  const rows = [
+    [`LỖI DỮ LIỆU SHEET TH — ${filename}`],
+    [`${issues.length} lỗi · ${groups.filter((group) => group.info.autoFix).reduce((total, group) => total + group.items.length, 0)} được sửa khi xuất · còn lại cần người kế hoạch kiểm tra`],
+    [],
+    ['Loại lỗi', 'Số lỗi', 'Khi xuất file'],
+    ...groups.map(({ info, items }) => [info.title, items.length, info.autoFix ? 'Tự sửa' : 'Cần kiểm tra']),
+    [],
+    ISSUE_COLUMNS.map(([name]) => name)
+  ];
+  const headerRow = rows.length - 1;
+  groups.flatMap(({ info, items }) => items.map((item) => ({ item, info }))).forEach(({ item, info }, index) => {
+    rows.push([
+      index + 1, severity[info.severity] || '', info.title, item.cell, item.line || '', item.customer || '', item.po || '',
+      item.ticket && item.ticket !== '0' ? item.ticket : '', item.ref || '', item.color || '', item.quantity || '',
+      viDay(item.input), viDay(item.output), item.value ?? '', item.expected ?? '', info.autoFix ? 'Tự sửa' : 'Cần kiểm tra',
+      item.reason || '', item.suggestion || '', item.howToCheck || ''
+    ]);
+  });
+  if (!issues.length) rows.push(['Không có lỗi nào.']);
+  const sheet = XLSX.utils.aoa_to_sheet(rows);
+  sheet['!cols'] = ISSUE_COLUMNS.map(([, wch]) => ({ wch }));
+  sheet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: headerRow, c: 0 }, e: { r: Math.max(headerRow, rows.length - 1), c: ISSUE_COLUMNS.length - 1 } }) };
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, 'LỖI FILE BOOKING');
+  return workbook;
+}
+
+// The export is what the planners hand over: TH and CAN DOI.
 export function buildExportWorkbook({ booking, lots = [], sheetCheck = null }) {
   const workbook = XLSX.utils.book_new();
-  const { sheet, records } = thSheet({ booking, lots, sheetCheck });
-  XLSX.utils.book_append_sheet(workbook, sheet, 'TH');
-  if (records.length) XLSX.utils.book_append_sheet(workbook, reconciliationSheet(records), 'ĐỐI CHIẾU');
+  XLSX.utils.book_append_sheet(workbook, thSheet({ booking, lots, sheetCheck }), 'TH');
+  XLSX.utils.book_append_sheet(workbook, canDoiSheet({ booking, lots }), 'CAN DOI');
   return workbook;
 }
 

@@ -484,9 +484,29 @@ button.warning-chip { cursor: pointer; }
 .issue-table th, .issue-table td { white-space: nowrap; }
 .issue-table .issue-value { color: #b52a36; font-weight: 700; }
 .issue-table .issue-expected { color: #08785b; font-weight: 700; }
-.issue-table .issue-note { white-space: normal; min-width: 220px; color: #4b6277; }
+.issue-table .issue-context { white-space: normal; min-width: 240px; color: #29445f; }
+.issue-table small { display: block; max-width: 220px; overflow: hidden; color: var(--muted); text-overflow: ellipsis; }
+.issue-table tbody.issue-item { border-bottom: 1px solid var(--line); }
+.issue-table tbody.issue-item tr:first-child th, .issue-table tbody.issue-item tr:first-child td { border-bottom: 0; }
+.issue-detail td { padding: 0 14px 12px !important; text-align: left !important; white-space: normal !important; }
+.issue-detail p { margin: 3px 0; color: #34495e; font-size: 11px; line-height: 1.5; }
+.issue-detail b { color: var(--ink); }
+.issue-table tbody.issue-in-week td, .issue-table tbody.issue-in-week th { background: #f2f8fd; }
+.issue-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 8px; }
+.issue-summary div { padding: 10px 12px; display: grid; gap: 2px; border-right: 1px solid var(--line); }
+.issue-summary div:last-child { border-right: 0; }
+.issue-summary strong { font-size: 20px; color: var(--ink); }
+.issue-summary span { color: var(--muted); font-size: 11px; }
+.issue-summary--fixed strong { color: #08785b; }
+.issue-summary--review strong { color: #805b08; }
+.issue-overview { border-collapse: collapse; font-size: 12px; }
+.issue-overview th { padding: 4px 16px 4px 0; text-align: left; color: var(--ink); }
+.issue-overview td { padding: 4px 12px 4px 0; color: #29445f; }
+.issue-search { display: flex; align-items: center; gap: 8px; padding: 0 11px; border: 1px solid #cbd8e2; border-radius: 6px; color: var(--muted); }
+.issue-search input { width: 100%; padding: 9px 0; border: 0; outline: 0; font: inherit; font-size: 12px; }
+.issue-download { margin: 0 0 0 auto; }
 .issue-table .issue-note .result-pill { margin-left: 6px; }
-.issue-table tr.issue-in-week td, .issue-table tr.issue-in-week th { background: #f2f8fd; }
+
 #checkModal .settings-dialog__header .batch-picker { margin-left: auto; }
 .change-reviewed { margin-right: auto; color: var(--muted); font-size: 11px; }
 .modal__backdrop { position: absolute; inset: 0; border: 0; background: rgb(5 24 43 / 58%); }
@@ -625,3 +645,7 @@ button.warning-chip { cursor: pointer; }
   .check-facts div { border-bottom: 1px solid var(--line); }
   #checkModal .settings-dialog__header { flex-wrap: wrap; }
 }
+@media (max-width: 900px) {
+  .issue-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.issue-table tbody.issue-item[hidden] { display: none; }

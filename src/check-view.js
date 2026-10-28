@@ -11,42 +11,78 @@ const cellValue = (value) => (typeof value === 'number' ? number(value) : escape
 
 // Problems found in the booking's TH sheet, grouped by kind, with the cell, the value in the
 // file and the value it should hold. Problems touching the selected week come first.
+// TH vs LEADTIME differences in the same shape as the cell-level issues.
+export function sheetIssueList(sheetCheck) {
+  const mismatches = (sheetCheck?.mismatches || []).map((item) => ({
+    type: 'sheet_mismatch', cell: item.row, po: item.po, ref: item.ref, value: item.quantity,
+    reason: `Dòng ${item.row} (PO ${item.po}, REF ${item.ref}) ${item.note}: sheet TH và sheet LEADTIME tương ứng phải có cùng dòng và cùng LINE QTY.`,
+    suggestion: 'Đối chiếu dòng này giữa sheet TH và sheet LEADTIME, sửa bên sai.',
+    howToCheck: `Tìm PO ${item.po} trong sheet TH và sheet LEADTIME.`
+  }));
+  return [...(sheetCheck?.cells?.issues || []), ...mismatches];
+}
+
+export const ISSUE_GROUPS = { ...ISSUE_TYPES, sheet_mismatch: { title: 'TH lệch sheet LEADTIME', severity: 'warning', autoFix: false } };
+
+function rowContext(issue) {
+  if (issue.date) return `Cột ngày PXC ${day(issue.date)}`;
+  const parts = [
+    issue.line && `LINE ${issue.line}`, issue.customer, issue.po && `PO ${issue.po}`,
+    issue.ticket && issue.ticket !== '0' && `phiếu ${issue.ticket}`, issue.quantity ? `SL ${number(issue.quantity)}` : '',
+    issue.input && `IN ${day(issue.input).slice(0, 5)}`, issue.output && `OUT ${day(issue.output).slice(0, 5)}`, issue.leadTime
+  ].filter(Boolean);
+  return parts.join(' · ');
+}
+
+// Problems found in the booking's TH sheet: a summary by kind (fixed on export or to review),
+// a search box, then every problem with its row, values, reasoning and how to check it.
 function renderSheetIssues(sheetCheck, booking) {
-  const cells = sheetCheck?.cells;
-  const mismatches = sheetCheck?.mismatches || [];
-  if (!cells?.checked) {
+  if (!sheetCheck?.cells?.checked) {
     return '<p class="check-note">Lần nhập này chưa có kiểm tra chi tiết. Nhập lại file booking để xem lỗi theo từng ô.</p>';
   }
+  const issues = sheetIssueList(sheetCheck);
+  if (!issues.length) return '<p class="check-note check-clean"><i class="ph ph-check-circle"></i> Không phát hiện lỗi nào trong sheet TH.</p>';
   const weekRows = new Set((booking.rows || []).map((row) => `${row.po}|${row.ref}`));
-  const weekDays = new Set((booking.days || []).map((day) => day.date));
+  const weekDays = new Set((booking.days || []).map((item) => item.date));
   const inWeek = (issue) => (issue.date ? weekDays.has(issue.date) : weekRows.has(`${issue.po}|${issue.ref}`));
-  const groups = Object.entries(ISSUE_TYPES)
-    .map(([type, info]) => ({ type, info, items: cells.issues.filter((issue) => issue.type === type) }))
+  const groups = Object.entries(ISSUE_GROUPS)
+    .map(([type, info]) => ({ type, info, items: issues.filter((issue) => issue.type === type) }))
     .filter((group) => group.items.length);
-  if (mismatches.length) {
-    groups.push({
-      type: 'sheet_mismatch',
-      info: { title: 'TH lệch sheet LEADTIME', severity: 'warning' },
-      items: mismatches.map((item) => ({ cell: item.row, po: item.po, ref: item.ref, value: item.quantity, note: item.note }))
-    });
-  }
-  if (!groups.length) return '<p class="check-note check-clean"><i class="ph ph-check-circle"></i> Không phát hiện lỗi nào trong sheet TH.</p>';
-  return groups.map(({ info, items }) => {
+  const fixed = groups.filter((group) => group.info.autoFix).reduce((sum, group) => sum + group.items.length, 0);
+  const summary = `<div class="issue-summary">
+    <div><strong>${number(issues.length)}</strong><span>lỗi trong ${number(sheetCheck.cells.rowCount || 0)} dòng TH</span></div>
+    <div class="issue-summary--fixed"><strong>${number(fixed)}</strong><span>sẽ tự sửa khi xuất</span></div>
+    <div class="issue-summary--review"><strong>${number(issues.length - fixed)}</strong><span>cần người kế hoạch kiểm tra</span></div>
+    <div><strong>${number(issues.filter(inWeek).length)}</strong><span>thuộc tuần đang chọn</span></div>
+  </div>
+  <table class="issue-overview"><tbody>${groups.map(({ info, items }) => `<tr><th>${escapeHtml(info.title)}</th><td>${number(items.length)}</td><td>${info.autoFix ? '<span class="result-pill result-pill--ok">tự sửa khi xuất</span>' : '<span class="result-pill result-pill--warn">cần kiểm tra</span>'}</td></tr>`).join('')}</tbody></table>
+  <label class="issue-search"><i class="ph ph-magnifying-glass"></i><input type="search" data-issue-search placeholder="Tìm theo ô (M2450), PO, mã hàng, số phiếu…" /></label>`;
+
+  return summary + groups.map(({ info, items }) => {
     const sorted = [...items].sort((a, b) => inWeek(b) - inWeek(a));
     const weekCount = items.filter(inWeek).length;
-    const rows = sorted.slice(0, ISSUES_SHOWN).map((issue) => `<tr class="${inWeek(issue) ? 'issue-in-week' : ''}">
-      <th>${escapeHtml(issue.cell)}</th>
-      <td class="th-left">${escapeHtml(issue.po || '—')}</td>
-      <td class="th-left">${escapeHtml(issue.ref || '—')}</td>
-      <td class="color-cell" title="${escapeHtml(issue.color || '')}">${escapeHtml(colorName(issue.color) || '—')}</td>
-      <td class="issue-value">${cellValue(issue.value)}</td>
-      <td class="issue-expected">${cellValue(issue.expected)}</td>
-      <td class="th-left issue-note">${escapeHtml(issue.note || '')}${inWeek(issue) ? '<span class="result-pill result-pill--info">tuần này</span>' : ''}</td>
-    </tr>`).join('');
+    const rows = sorted.slice(0, ISSUES_SHOWN).map((issue) => {
+      const search = [issue.cell, issue.po, issue.ref, issue.color, issue.ticket, issue.line].filter(Boolean).join(' ').toLocaleLowerCase('vi-VN');
+      return `<tbody class="issue-item${inWeek(issue) ? ' issue-in-week' : ''}" data-issue-text="${escapeHtml(search)}">
+      <tr>
+        <th>${escapeHtml(issue.cell)}</th>
+        <td class="th-left issue-context">${escapeHtml(rowContext(issue))}</td>
+        <td class="th-left">${escapeHtml(issue.ref || '—')}<small title="${escapeHtml(issue.color || '')}">${escapeHtml(colorName(issue.color) || '')}</small></td>
+        <td class="issue-value">${cellValue(issue.value)}</td>
+        <td class="issue-expected">${cellValue(issue.expected)}</td>
+        <td>${info.autoFix ? '<span class="result-pill result-pill--ok">Tự sửa</span>' : '<span class="result-pill result-pill--warn">Kiểm tra</span>'}${inWeek(issue) ? '<span class="result-pill result-pill--info">tuần này</span>' : ''}</td>
+      </tr>
+      <tr class="issue-detail"><td colspan="6">
+        <p><b>Lý do:</b> ${escapeHtml(issue.reason || '')}</p>
+        ${issue.suggestion ? `<p><b>Đề xuất:</b> ${escapeHtml(issue.suggestion)}</p>` : ''}
+        ${issue.howToCheck ? `<p><b>Cách kiểm tra:</b> ${escapeHtml(issue.howToCheck)}</p>` : ''}
+      </td></tr>
+    </tbody>`;
+    }).join('');
     return `<details class="issue-group issue-group--${info.severity}"${weekCount ? ' open' : ''}>
-      <summary><strong>${escapeHtml(info.title)}</strong><span>${number(items.length)} ô${weekCount ? ` · ${number(weekCount)} trong tuần này` : ''}</span></summary>
-      <div class="table-wrap"><table class="delivery-table issue-table"><thead><tr><th>Ô</th><th class="th-left">PO</th><th class="th-left">Mã hàng</th><th class="th-left">Màu</th><th>Trong file</th><th>Đúng ra</th><th class="th-left">Ghi chú</th></tr></thead><tbody>${rows}</tbody></table></div>
-      ${items.length > ISSUES_SHOWN ? `<p class="check-note">Hiện ${number(ISSUES_SHOWN)} / ${number(items.length)} ô.</p>` : ''}
+      <summary><strong>${escapeHtml(info.title)}</strong><span>${number(items.length)} lỗi${weekCount ? ` · ${number(weekCount)} trong tuần này` : ''} · ${info.autoFix ? 'tự sửa khi xuất' : 'cần kiểm tra'}</span></summary>
+      <div class="table-wrap"><table class="delivery-table issue-table"><thead><tr><th>Ô</th><th class="th-left">Dòng trong file</th><th class="th-left">Mã hàng · Màu</th><th>Trong file</th><th>Đúng ra</th><th>Xử lý</th></tr></thead>${rows}</table></div>
+      ${items.length > ISSUES_SHOWN ? `<p class="check-note">Hiện ${number(ISSUES_SHOWN)} / ${number(items.length)} lỗi — tải danh sách lỗi để xem đủ.</p>` : ''}
     </details>`;
   }).join('');
 }
@@ -121,13 +157,13 @@ export function renderCheckReport({ booking, summary, sources, aiReport, sheetCh
     <section class="check-block"><h3>Cần lưu ý ${warnings.length ? `<span class="check-count">${number(warnings.length)}</span>` : ''}</h3>
       ${warnings.length ? `<ul class="check-warnings">${warnings.map((text) => `<li><i class="ph ph-warning"></i>${escapeHtml(text)}</li>`).join('')}</ul>` : '<p class="check-note">Không có gì cần lưu ý.</p>'}
     </section>
-    <section class="check-block"><h3>Lỗi trong sheet TH ${issueCount ? `<span class="check-count">${number(issueCount)}</span>` : ''}</h3>
+    <section class="check-block"><h3>Lỗi trong sheet TH ${issueCount ? `<span class="check-count">${number(issueCount)}</span>` : ''}${issueCount ? '<button type="button" class="link-refresh issue-download" data-download-issues><i class="ph ph-download-simple"></i>Tải danh sách lỗi (cả file)</button>' : ''}</h3>
       ${renderSheetIssues(sheetCheck, booking)}
-      ${issueCount ? '<p class="check-note">Khi xuất, SLHĐ TỔNG, TỔNG NGÀY và PXI TRẢ sai năm được sửa sẵn trong sheet TH (ô đã sửa có ghi chú giá trị cũ); mọi lỗi của tuần được liệt kê ở sheet ĐỐI CHIẾU với kết quả Đã sửa / Cần kiểm tra.</p>' : ''}
+      ${issueCount ? '<p class="check-note">Đây là lỗi trong dữ liệu nhập của sheet TH. Khi xuất, PXI TRẢ gõ nhầm năm được sửa (ô có ghi chú giá trị cũ); SLHĐ TỔNG, TỔNG NGÀY, TỔNG TUẦN luôn được tính lại; các lỗi còn lại cần người kế hoạch sửa trong file booking.</p>' : ''}
     </section>
     <section class="check-block"><h3>Xem trước ${number(Math.min(PREVIEW_ROWS, rows.length))} / ${number(rows.length)} dòng sẽ xuất</h3>
       <div class="table-wrap"><table class="delivery-table check-preview"><thead><tr><th>PO</th><th class="th-left">Mã hàng</th><th class="th-left">Model</th><th class="th-left">Màu</th><th>SL tuần</th><th>Nhận BTP</th><th>Đã in (giao)</th><th>Còn thiếu</th><th>Hạn giao</th><th>Trạng thái lô</th></tr></thead>
       <tbody>${preview || '<tr><td colspan="10" class="delivery-table__empty">Không có dòng nào.</td></tr>'}</tbody></table></div>
-      <p class="check-note">File xuất là một sheet TH giống file booking, chỉ gồm các dòng và các ngày của tuần này.</p>
+      <p class="check-note">File xuất gồm 2 sheet: TH (giống file booking, chỉ các dòng và ngày của tuần) và CAN DOI (mỗi lô một dòng, số lượng từng ngày, Thực nhận / Đã in / Đã giao / GAP lấy từ file nhận và file giao).</p>
     </section>`;
 }
