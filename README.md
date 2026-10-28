@@ -17,13 +17,25 @@ App desktop (Electron) chứa sẵn máy chủ: SQLite, tải link SharePoint v�
 
 ```bash
 npm run desktop     # chạy thử app desktop từ mã nguồn
-npm run dist:mac    # release/Inkava Planner-<phiên bản>-arm64.dmg (chip Apple) và …dmg (chip Intel)
-npm run dist:win    # release/Inkava Planner Setup <phiên bản>.exe (Windows x64)
+npm run dist:mac    # release/Inkava-Planner-<phiên bản>-arm64.dmg (chip Apple) và …-x64.dmg (chip Intel)
+npm run dist:win    # release/Inkava-Planner-Setup-<phiên bản>.exe (Windows x64)
 ```
 
 App chưa được ký bằng chứng chỉ của Apple / Microsoft:
 - macOS: lần đầu mở bằng chuột phải → **Open**, hoặc System Settings → Privacy & Security → **Open Anyway**.
 - Windows: SmartScreen báo “Windows protected your PC” → **More info** → **Run anyway**.
+
+### Cập nhật phiên bản
+
+Phiên bản hiện tại hiện ở cuối thanh bên (bản đầu tiên: **v0.0.1**). Nút **Cập nhật** (chỉ có trong app desktop) đọc bản phát hành mới nhất trên GitHub Releases của repo; khi có bản mới hơn, nút chuyển màu xanh “Cập nhật vX.Y.Z”. Nhấn nút → xác nhận → app tải file cài cho đúng máy, đóng lại, cài đè lên bản cũ rồi tự mở bản mới. Dữ liệu SQLite không bị ảnh hưởng vì nằm ngoài thư mục app.
+
+- macOS: app phải nằm trong một thư mục ghi được (thường là Applications). Nếu đang mở thẳng từ file .dmg, app chỉ mở file .dmg mới để kéo thả thay bản cũ.
+- Windows: bộ cài chạy ở chế độ im lặng vào đúng thư mục đã cài trước đó.
+
+Phát hành bản mới:
+1. Tăng `version` trong `package.json` (ví dụ `0.0.2`).
+2. `npm run dist:mac` và `npm run dist:win`.
+3. Tạo GitHub Release với tag `v0.0.2`, đính kèm `Inkava-Planner-0.0.2-arm64.dmg`, `Inkava-Planner-0.0.2-x64.dmg` và `Inkava-Planner-Setup-0.0.2.exe` (giữ nguyên tên file). Phần mô tả của Release hiện trong hộp xác nhận cập nhật.
 
 ## Luồng sử dụng
 
@@ -74,18 +86,6 @@ Mục **Tổng quan** phân loại lịch sử file thành:
 - File kết quả đã giao.
 - File đã xử lý nhưng chưa giao.
 - File gốc chưa chỉnh sửa. Ứng dụng không ghi đè workbook tải lên; chỉ lưu dữ liệu đã đọc vào SQLite.
-
-Mục **Cấu hình** vẫn lưu danh mục định mức phút/máy, nhưng Tổng quan và Kế hoạch không còn dùng số phút/máy; kết quả dựa trên số nhận/giao thực tế.
-
-## Danh mục cấu hình định mức
-
-- Có thể nhập file Excel hoặc tạo từng định mức thủ công.
-- Khi nhập thủ công, ứng dụng gợi ý 19 máy/công đoạn hiện có tại nhà máy: nhóm OVAL, máy Tự Động, máy in K3, SẤY, ÉP, in BÀN và THÊU.
-- AI local tự nhận diện các cột tên/mã kiểu, số phút, số máy, số ca, phút mỗi ca, hiệu suất và số ngày kế hoạch.
-- File cấu hình nhập vào được lưu thành danh mục mặc định; định mức đầu tiên được áp dụng cho phép tính kế hoạch.
-- Chọn một mục như **Oval 18** để xem toàn bộ thông tin.
-- Định mức đã lưu luôn bị khóa. Muốn sửa phải nhấn **Mở khóa để sửa** và xác nhận cảnh báo; sau khi lưu hệ thống tự khóa lại.
-- Khi chạy local, danh mục nằm trong bảng SQLite `production_standards`. Bản Sites lưu danh mục trong trình duyệt.
 
 ## Preview bằng Sites
 

@@ -1,6 +1,6 @@
 {
   "name": "inkava-production-planner",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -51,7 +51,8 @@
       ],
       "category": "public.app-category.business",
       "identity": "-",
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "artifactName": "Inkava-Planner-${version}-${arch}.${ext}"
     },
     "dmg": {
       "title": "Inkava Planner"
@@ -69,7 +70,12 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "Inkava Planner"
+      "shortcutName": "Inkava Planner",
+      "artifactName": "Inkava-Planner-Setup-${version}.${ext}"
     }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Khiemnguyen198/NguyenCuuKhiem.git"
   }
 }
