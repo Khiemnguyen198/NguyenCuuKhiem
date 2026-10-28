@@ -25,7 +25,8 @@ button { cursor: pointer; }
 
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 190px minmax(0, 1fr); }
 .sidebar { position: sticky; top: 0; height: 100vh; color: #fff; background: var(--navy-950); display: flex; flex-direction: column; box-shadow: 7px 0 30px rgb(8 35 63 / 10%); z-index: 10; }
-.brand { padding: 28px 24px 26px; font-weight: 780; font-size: 21px; line-height: 1.23; letter-spacing: -.02em; }
+.brand { height: 101px; display: grid; place-items: center; overflow: hidden; }
+.brand img { width: 260px; height: 260px; max-width: none; display: block; object-fit: contain; }
 .nav { display: grid; gap: 5px; }
 .nav__item { position: relative; width: 100%; border: 0; display: flex; align-items: center; gap: 15px; padding: 16px 22px; color: #d9e6f2; background: transparent; text-align: left; font-weight: 560; font-size: 15px; transition: background .2s, color .2s; }
 .nav__item i { font-size: 22px; }
@@ -550,8 +551,8 @@ button.warning-chip { cursor: pointer; }
   .plan-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .source-grid { grid-template-columns: 1fr; }
   .app-shell { grid-template-columns: 74px minmax(0, 1fr); }
-  .brand { font-size: 0; padding: 23px; }
-  .brand::after { content: "BP"; font-size: 18px; }
+  .brand { height: 74px; }
+  .brand img { width: 100px; height: 100px; }
   .nav__item { justify-content: center; padding: 17px; }
   .nav__item span, .sidebar__foot, #appVersion, .app-update__button span { display: none; }
   .app-update { padding: 0 12px; }

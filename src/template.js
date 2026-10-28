@@ -6,7 +6,7 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, ca
   return `
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand">Bàn điều phối<br />sản xuất</div>
+      <div class="brand"><img src="/inkava-logo.png" alt="Inkava" /></div>
       <nav class="nav" aria-label="Điều hướng chính">
         <button class="nav__item nav__item--active" data-page="Tổng quan"><i class="ph ph-house"></i><span>Tổng quan</span></button>
         <button class="nav__item" data-page="Mã hàng"><i class="ph ph-list-magnifying-glass"></i><span>Theo mã hàng</span></button>

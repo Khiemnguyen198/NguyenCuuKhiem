@@ -1,6 +1,6 @@
 {
   "name": "inkava-production-planner",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -40,6 +40,7 @@
       "!src/**/*.test.js"
     ],
     "mac": {
+      "icon": "public/inkava-logo.png",
       "target": [
         {
           "target": "dmg",
@@ -58,6 +59,7 @@
       "title": "Inkava Planner"
     },
     "win": {
+      "icon": "public/inkava-logo.png",
       "target": [
         {
           "target": "nsis",
