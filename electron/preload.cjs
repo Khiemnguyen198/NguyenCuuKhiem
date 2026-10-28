@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('planner', {
   version: () => ipcRenderer.invoke('planner:version'),
+  pickExcelPath: () => ipcRenderer.invoke('dialog:pick-excel'),
   checkForUpdate: () => ipcRenderer.invoke('update:check'),
   installUpdate: () => ipcRenderer.invoke('update:install'),
   onUpdateProgress: (callback) => {

@@ -1,7 +1,7 @@
 import { STATUS_FILTERS } from './models-view.js';
 import { renderSourceCards } from './sources.js';
 
-export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion }) {
+export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, canBrowse = false }) {
   return `
   <div class="app-shell">
     <aside class="sidebar">
@@ -27,7 +27,7 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion }) 
           </div>
           <button class="primary-button" id="importButton" hidden><i class="ph ph-upload-simple"></i>Nhập file booking</button>
           <button class="back-button" id="backToPlans" hidden><i class="ph ph-arrow-left"></i>Danh sách kế hoạch</button>
-          <input id="fileInput" type="file" accept=".xlsx,.xls" hidden />
+          <input id="fileInput" type="file" accept=".xlsx,.xls,.xlsm,.xlsb" hidden />
         </div>
         <div class="topbar__actions">
           <button class="changes-button" id="changesButton" type="button"><i class="ph ph-bell-ringing"></i><span>Thay đổi booking</span><b id="changesBadge" hidden>0</b></button>
@@ -36,8 +36,17 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion }) 
       </header>
 
       <section class="plan-list-view" id="planListView" hidden>
+        <section class="delivery-summary plan-results">
+          <div class="delivery-summary__heading">
+            <div><p class="section-heading__overline">KẾT QUẢ TỔNG HỢP CHI TIẾT</p><h2>Booking, nhận và giao của tuần booking</h2><p id="planResultsMeta">Chưa có dữ liệu booking.</p></div>
+            <div class="batch-pickers"><label class="batch-picker"><span>Tuần booking</span><select data-batch-select aria-label="Chọn tuần booking"></select></label><label class="batch-picker batch-picker--day"><span>Ngày</span><select data-day-select aria-label="Chọn ngày trong tuần"></select></label></div>
+          </div>
+          <div class="plan-cards" id="planCards"></div>
+          <div class="model-filters"><label class="model-search"><i class="ph ph-magnifying-glass"></i><input id="planSearch" type="search" placeholder="Tìm khách hàng, mã hàng, model, màu, PO…" /></label><span class="plan-results__count" id="planResultsCount"></span></div>
+          <div id="planTable"></div>
+        </section>
         <div class="plan-list-heading">
-          <div><p class="section-heading__overline">DỮ LIỆU ĐÃ NHẬP</p><h2>Các file kế hoạch</h2><p>Chọn một file để mở bảng điều phối và xem năng lực sản xuất.</p></div>
+          <div><p class="section-heading__overline">DỮ LIỆU ĐÃ NHẬP</p><h2>Các file booking đã nhập</h2><p>Chọn một file để mở bảng điều phối của file đó.</p></div>
           <div class="plan-list-total"><strong id="planCount">0</strong><span>kế hoạch</span></div>
         </div>
         <div class="plan-list" id="planFiles"></div>
@@ -65,6 +74,7 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion }) 
               <datalist id="filterOptions-model"></datalist><datalist id="filterOptions-modelCode"></datalist><datalist id="filterOptions-color"></datalist>
             </div>
             <select data-batch-select aria-label="Chọn tuần booking"></select>
+            <select data-day-select aria-label="Chọn ngày trong tuần"></select>
             <select id="customerFilter" aria-label="Lọc theo khách hàng"><option value="">Tất cả khách hàng</option></select>
             <div class="status-filters" id="statusFilters" role="group" aria-label="Lọc theo trạng thái">${STATUS_FILTERS.map(([value, label]) => `<button type="button" data-status="${value}"${value === 'open' ? ' aria-pressed="true"' : ''}>${label}<span data-status-count="${value}"></span></button>`).join('')}</div>
           </div>
@@ -76,15 +86,14 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion }) 
       <section class="overview-view" id="overviewView">
         <section class="delivery-summary sources-panel">
           <div class="delivery-summary__heading">
-            <div><p class="section-heading__overline">NGUỒN DỮ LIỆU</p><h2>Nhập booking, nhận và giao</h2><p>Mỗi nguồn nhận file Excel hoặc link. Nhập lại bất cứ lúc nào để cập nhật số liệu.</p></div>
-            <button class="primary-button" data-check><i class="ph ph-list-checks"></i>Kiểm tra file</button>
+            <div><p class="section-heading__overline">NGUỒN DỮ LIỆU</p><h2>Nhập booking, nhận và giao</h2><p>${isStaticPages ? 'Mỗi nguồn nhận file Excel hoặc link.' : 'Mỗi nguồn nhận file Excel, link hoặc đường dẫn trên máy chủ nội bộ (kể cả file có macro .xlsm). Link và đường dẫn được tự cập nhật khi file thay đổi.'}</p></div>
           </div>
-          <div class="source-grid">${renderSourceCards()}</div>
+          <div class="source-grid">${renderSourceCards({ allowPath: !isStaticPages, canBrowse })}</div>
         </section>
         <section class="delivery-summary">
           <div class="delivery-summary__heading">
             <div><p class="section-heading__overline">KẾT QUẢ TỔNG HỢP</p><h2>Booking, nhận, in và giao</h2><p id="overviewMeta">Số liệu thực tế từ file nhận và file giao, đối chiếu với booking.</p></div>
-            <label class="batch-picker"><span>Tuần booking</span><select data-batch-select aria-label="Chọn tuần booking"></select></label>
+            <div class="batch-pickers"><label class="batch-picker"><span>Tuần booking</span><select data-batch-select aria-label="Chọn tuần booking"></select></label><label class="batch-picker batch-picker--day"><span>Ngày</span><select data-day-select aria-label="Chọn ngày trong tuần"></select></label></div>
           </div>
           <div class="delivery-kpis delivery-kpis--six" id="overviewKpis"></div>
           <div class="warning-strip" id="overviewWarnings"></div>
@@ -155,7 +164,7 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion }) 
     <section class="settings-dialog changes-dialog" role="dialog" aria-modal="true" aria-labelledby="checkTitle">
       <header class="settings-dialog__header">
         <div><p class="section-heading__overline">KIỂM TRA FILE</p><h2 id="checkTitle">Dữ liệu chuẩn bị xuất</h2></div>
-        <label class="batch-picker"><span>Tuần booking</span><select data-batch-select aria-label="Chọn tuần booking"></select></label>
+        <div class="batch-pickers"><label class="batch-picker"><span>Tuần booking</span><select data-batch-select aria-label="Chọn tuần booking"></select></label><label class="batch-picker batch-picker--day"><span>Ngày</span><select data-day-select aria-label="Chọn ngày trong tuần"></select></label></div>
         <button class="icon-button" data-close-check aria-label="Đóng"><i class="ph ph-x"></i></button>
       </header>
       <div class="check-report" id="checkReport"></div>

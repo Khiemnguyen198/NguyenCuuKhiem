@@ -13,7 +13,8 @@ import { readWarehouseWorkbook } from './warehouse-import.js';
 import { compactReceiptLines, readReceiptsWorkbook } from './receipts-import.js';
 import { restrictToRows, summarizeLots, totalsOf } from './lots.js';
 import { renderLeadtimeRows, renderWarnings } from './progress-view.js';
-import { downloadFromLink } from './sources.js';
+import { downloadFromLink, originType, readFromPath, SOURCES, statPath } from './sources.js';
+import { filterOrders, planOrders, planTotals, renderPlanCards, renderPlanTab } from './plan-results.js';
 import { buildExportWorkbook, buildIssuesWorkbook, downloadWorkbook, exportFilename, sortByUrgency } from './export-workbook.js';
 import { compactRows, diffBookingRows } from './booking-diff.js';
 import { renderChangeList, renderChangeReport, unreviewedCount } from './changes-view.js';
@@ -35,6 +36,8 @@ const EMPTY_DETAIL = { importId: null, filename: null, days: [], rows: [] };
 let bookingDetail = EMPTY_DETAIL;
 // 'all', a week key (its Monday), or null until the first booking picks the current week.
 let batchKey = readJson('planner-batch', null);
+// '' = the whole week, otherwise the index of one PXC day in it.
+let dayKey = readJson('planner-day', '');
 let activeImportId = fallbackDashboard.importId;
 let fileHistoryState = [{
   id: 'demo-original',
@@ -47,7 +50,7 @@ let fileHistoryState = [{
   note: 'File gốc được giữ nguyên; hệ thống chỉ đọc dữ liệu.'
 }];
 
-document.querySelector('#app').innerHTML = appTemplate({ isStaticPages, appVersion: __APP_VERSION__, ...workWeekLabel() });
+document.querySelector('#app').innerHTML = appTemplate({ isStaticPages, appVersion: __APP_VERSION__, canBrowse: Boolean(window.planner?.pickExcelPath), ...workWeekLabel() });
 
 function renderDashboard(data) {
   dashboardState = { ...fallbackDashboard, ...data };
@@ -168,7 +171,7 @@ async function loadFileHistory() {
 const PAGE_COPY = {
   'Tổng quan': ['KHẢ NĂNG GIAO HÀNG', 'Tổng quan'],
   'Mã hàng': ['GIAO BÁN THÀNH PHẨM', 'Theo mã hàng'],
-  'Kế hoạch': ['DANH SÁCH KẾ HOẠCH', 'Kế hoạch']
+  'Kế hoạch': ['KẾT QUẢ TỔNG HỢP', 'Kế hoạch']
 };
 
 function showPage(pageName) {
@@ -263,24 +266,32 @@ const modelFilters = { customer: '', status: 'open', query: '', columns: { model
 let expandedModelKey = null;
 let modelLimit = PAGE_SIZE;
 
-function sourceMeta(source, detail, kind = null) {
+const ORIGIN_COPY = { link: 'Link', path: 'Đường dẫn' };
+
+// What a card shows: the file loaded, when, from where, and how it keeps itself up to date.
+function sourceMeta(source, detail, kind) {
   if (!source?.filename) return '<span class="muted">Chưa có dữ liệu</span>';
-  const fromLink = Boolean(source.origin) && kind && !isStaticPages;
-  const origin = source.origin ? ' · từ link' : '';
-  const refresh = fromLink
-    ? `<button type="button" class="link-refresh" data-refresh-source="${kind}" title="${escapeHtml(source.origin)}"><i class="ph ph-arrows-clockwise"></i>Cập nhật từ link</button><small>Tự cập nhật mỗi ${AUTO_REFRESH_MINUTES} phút khi trang đang mở</small>`
-    : '';
-  return `<strong title="${escapeHtml(source.filename)}">${escapeHtml(source.filename)}</strong><span>${escapeHtml(formatFileDate(source.importedAt))}${origin} · ${detail}</span>${refresh}`;
+  const origin = originState[kind]?.origin;
+  const type = originType(origin);
+  const from = type
+    ? `<span class="source-origin source-origin--${type}" title="${escapeHtml(origin)}"><i class="ph ${type === 'link' ? 'ph-link' : 'ph-folder-open'}"></i>${ORIGIN_COPY[type]}: ${escapeHtml(origin)}</span>`
+    : '<span class="source-origin"><i class="ph ph-file"></i>File chọn từ máy</span>';
+  const auto = type === 'path'
+    ? `<small>Tự đọc lại khi file được lưu (kiểm tra mỗi ${PATH_POLL_SECONDS} giây)</small>`
+    : type === 'link' ? `<small>Tự tải lại mỗi ${AUTO_REFRESH_MINUTES} phút khi ứng dụng đang mở</small>` : '';
+  return `<strong title="${escapeHtml(source.filename)}">${escapeHtml(source.filename)}</strong><span>${escapeHtml(formatFileDate(source.importedAt))} · ${detail}</span>${from}${auto}`;
 }
 
 function renderSources() {
   const booking = latestBooking.source === 'demo' ? null : latestBooking;
   document.querySelector('#sourceMeta-booking').innerHTML = booking
-    ? sourceMeta({ filename: booking.filename, importedAt: booking.importedAt || booking.createdAt }, `${formatNumber.format(booking.rowCount)} dòng · ${formatNumber.format(lotSummary ? lotSummary.items.filter((item) => !item.outsideBooking).length : 0)} lô`)
-    : '<span class="muted">Đang hiện dữ liệu mẫu</span>';
+    ? sourceMeta({ filename: booking.filename, importedAt: booking.importedAt || booking.createdAt }, `${formatNumber.format(booking.rowCount)} dòng · ${formatNumber.format(lotSummary ? lotSummary.items.filter((item) => !item.outsideBooking).length : 0)} lô`, 'booking')
+    : '<span class="muted">Chưa có file booking (đang hiện dữ liệu mẫu)</span>';
   const receiptCount = sourceState.receipts.lines.reduce((sum, line) => sum + (line.receipts ?? 1), 0);
   document.querySelector('#sourceMeta-receipts').innerHTML = sourceMeta(sourceState.receipts, `${formatNumber.format(receiptCount)} lần nhận`, 'receipts');
   document.querySelector('#sourceMeta-deliveries').innerHTML = sourceMeta(sourceState.deliveries, `${formatNumber.format(sourceState.deliveries.lines.length)} dòng PO`, 'deliveries');
+  const loaded = { booking: Boolean(booking), receipts: Boolean(sourceState.receipts.filename), deliveries: Boolean(sourceState.deliveries.filename) };
+  document.querySelectorAll('[data-delete-source]').forEach((button) => { button.disabled = !loaded[button.dataset.deleteSource]; });
 }
 
 function renderWarehouse() {
@@ -308,6 +319,7 @@ function renderWarehouse() {
   renderModelTable();
   renderOverview();
   renderPlanProgress();
+  renderPlanResults();
 }
 
 function bookingWeeks() {
@@ -322,9 +334,25 @@ function selectedWeek() {
   return weeks.find((week) => week.key === batchKey);
 }
 
+const WEEKDAYS = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+const dayName = (iso) => `${WEEKDAYS[new Date(`${iso}T00:00:00Z`).getUTCDay()]} ${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+
+// The selected week, or one day of it when a day is picked.
+function selectedBatch() {
+  const week = selectedWeek();
+  if (!week || dayKey === '') return week;
+  const index = Number(dayKey);
+  const date = bookingDetail.days[index]?.date;
+  if (!week.dayIndexes.includes(index) || !date) {
+    dayKey = '';
+    return week;
+  }
+  return { key: `${week.key}:${index}`, from: date, to: date, dayIndexes: [index], label: `${dayName(date)}/${date.slice(0, 4)} (${week.label})` };
+}
+
 // The booking as the rest of the page sees it: the whole file, or only the selected batch.
 function activeBooking() {
-  const week = selectedWeek();
+  const week = selectedBatch();
   if (!week) return { ...latestBooking, rows: bookingDetail.rows, days: bookingDetail.days };
   const rows = batchRows(bookingDetail.rows, bookingDetail.days, week);
   const days = week.dayIndexes.map((index) => bookingDetail.days[index]);
@@ -348,6 +376,41 @@ function renderBatchOptions() {
     select.value = weeks.length ? batchKey : 'all';
     select.disabled = !weeks.length;
   });
+  selectedBatch();
+  const week = weeks.find((item) => item.key === batchKey);
+  const dayOptions = week
+    ? `<option value="">Cả tuần</option>${week.dayIndexes.map((index) => {
+      const count = bookingDetail.rows.filter((row) => String(index) in (row.allocations || {})).length;
+      return `<option value="${index}">${escapeHtml(dayName(bookingDetail.days[index].date))} · ${formatNumber.format(count)} dòng</option>`;
+    }).join('')}`
+    : '<option value="">Cả tuần</option>';
+  document.querySelectorAll('[data-day-select]').forEach((select) => {
+    select.innerHTML = dayOptions;
+    select.value = dayKey;
+    select.disabled = !week;
+  });
+}
+
+// Kế hoạch page: the selected week/day from the booking, receiving and delivery files, each
+// on its own and all three together.
+let planTab = readJson('planner-plan-tab', 'combined');
+let planQuery = '';
+
+function renderPlanResults() {
+  if (!warehouseSummary) return;
+  const booking = activeBooking();
+  const orders = planOrders(warehouseSummary.items);
+  const shown = filterOrders(orders, planQuery);
+  const totals = planTotals(shown);
+  document.querySelector('#planCards').innerHTML = renderPlanCards(totals, planTab);
+  document.querySelector('#planTable').innerHTML = renderPlanTab(planTab, shown, totals);
+  document.querySelector('#planResultsCount').textContent = planQuery ? `${formatNumber.format(shown.length)} / ${formatNumber.format(orders.length)} đơn` : `${formatNumber.format(orders.length)} đơn`;
+  const files = [
+    latestBooking.source === 'demo' ? 'booking mẫu' : `booking: ${latestBooking.filename}`,
+    sourceState.receipts.filename ? `nhận: ${sourceState.receipts.filename}` : 'chưa có file nhận',
+    sourceState.deliveries.filename ? `giao: ${sourceState.deliveries.filename}` : 'chưa có file giao'
+  ];
+  document.querySelector('#planResultsMeta').textContent = `${booking.batch ? `${booking.batch.label} · ` : ''}${files.join(' · ')}`;
 }
 
 async function loadBookingDetail() {
@@ -467,8 +530,8 @@ async function saveSource(kind, snapshot) {
   sourceState[kind] = payload;
 }
 
-async function importSource(kind, buffer, filename, origin = null) {
-  if (kind === 'booking') return importBooking(buffer, filename, origin);
+async function importSource(kind, buffer, filename, origin = null, { quiet = false } = {}) {
+  if (kind === 'booking') return importBooking(buffer, filename, origin, { quiet });
   const lines = kind === 'receipts' ? readReceiptsWorkbook(buffer).lines : readWarehouseWorkbook(buffer);
   if (!lines.length) throw new Error('File không có dòng dữ liệu hợp lệ.');
   const stored = kind === 'receipts' && isStaticPages ? compactReceiptLines(lines) : lines;
@@ -476,38 +539,109 @@ async function importSource(kind, buffer, filename, origin = null) {
   expandedModelKey = null;
   modelLimit = PAGE_SIZE;
   renderWarehouse();
-  showToast(kind === 'receipts'
-    ? `Đã đọc ${formatNumber.format(lines.length)} lần nhận BTP.`
-    : `Đã đọc ${formatNumber.format(lines.length)} dòng PO từ file giao.`);
+  const what = kind === 'receipts' ? `${formatNumber.format(lines.length)} lần nhận BTP` : `${formatNumber.format(lines.length)} dòng PO từ file giao`;
+  showToast(quiet ? `Đã tự cập nhật ${SOURCES[kind].title}: ${what}.` : `Đã đọc ${what}.`, quiet ? 'info' : 'success');
   return null;
 }
 
-// The receiving and delivery files live on SharePoint and are edited all day; a source added
-// from a link is downloaded again on demand, on page load and every AUTO_REFRESH_MINUTES.
+// Where each input comes from. A link is downloaded again every AUTO_REFRESH_MINUTES; a path
+// (file on a shared drive, edited and saved all day, macros included) is checked every
+// PATH_POLL_SECONDS and read again as soon as its modified time changes.
 const AUTO_REFRESH_MINUTES = 30;
+const PATH_POLL_SECONDS = 60;
+const originState = { booking: null, receipts: null, deliveries: null };
 const refreshing = new Set();
 
-async function refreshSource(kind, { quiet = false } = {}) {
-  const { origin } = sourceState[kind];
-  if (!origin || isStaticPages || refreshing.has(kind)) return;
+async function loadOrigins() {
+  if (isStaticPages) {
+    Object.assign(originState, readJson('planner-origins', {}));
+    return;
+  }
+  try {
+    const response = await fetch('/api/origins');
+    if (response.ok) Object.assign(originState, await response.json());
+  } catch {
+    // Without the list the sources still work; they just do not refresh themselves.
+  }
+}
+
+async function saveOrigin(kind, origin, mtime = null) {
+  originState[kind] = origin ? { origin, mtime } : null;
+  if (isStaticPages) {
+    writeJson('planner-origins', originState);
+    return;
+  }
+  const response = await fetch('/api/origins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, origin, mtime }) });
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Không lưu được nguồn dữ liệu.');
+}
+
+async function readOrigin(origin) {
+  if (originType(origin) === 'path') return readFromPath(origin);
+  const { buffer, filename } = await downloadFromLink(origin, { viaServer: !isStaticPages });
+  return { buffer, filename, mtime: new Date().toISOString() };
+}
+
+// Reads the file from its link or path, imports it and remembers the origin for refreshes.
+async function useOrigin(kind, origin, { quiet = false } = {}) {
+  if (refreshing.has(kind)) return;
   refreshing.add(kind);
   try {
-    const { buffer, filename } = await downloadFromLink(origin, { viaServer: true });
-    await importSource(kind, buffer, filename, origin);
-  } catch (error) {
-    if (!quiet) throw error;
-    console.warn(`Không tự cập nhật được ${kind} từ link:`, error);
+    const { buffer, filename, mtime } = await readOrigin(origin);
+    await saveOrigin(kind, origin, mtime);
+    await importSource(kind, buffer, filename, origin, { quiet });
   } finally {
     refreshing.delete(kind);
   }
 }
 
-async function refreshStaleSources() {
-  for (const kind of Object.keys(sourceState)) {
-    const { origin, importedAt } = sourceState[kind];
-    const age = Date.now() - Date.parse(importedAt || 0);
-    if (origin && !(age < AUTO_REFRESH_MINUTES * 60_000)) await refreshSource(kind, { quiet: true });
+async function pollOrigins() {
+  if (isStaticPages) return;
+  for (const kind of Object.keys(originState)) {
+    const { origin, mtime } = originState[kind] || {};
+    if (!origin || refreshing.has(kind)) continue;
+    try {
+      if (originType(origin) === 'path') {
+        const info = await statPath(origin);
+        if (info.mtime !== mtime) await useOrigin(kind, origin, { quiet: true });
+      } else if (!(Date.now() - Date.parse(mtime || 0) < AUTO_REFRESH_MINUTES * 60_000)) {
+        await useOrigin(kind, origin, { quiet: true });
+      }
+    } catch (error) {
+      console.warn(`Không tự cập nhật được ${kind}:`, error);
+    }
   }
+}
+
+async function deleteSource(kind) {
+  const title = SOURCES[kind].title;
+  const extra = kind === 'booking' ? '\nFile booking đang hiện sẽ bị xoá khỏi lịch sử; bản nhập trước đó (nếu có) sẽ hiện lại.' : '';
+  if (!window.confirm(`Xoá file của mục ${title}?${extra}\nFile Excel gốc trên máy/ổ mạng không bị ảnh hưởng.`)) return;
+  if (kind === 'booking') {
+    if (isStaticPages) {
+      const files = fileHistoryState.filter((file) => String(file.importId) !== String(latestBooking.importId));
+      saveBrowserFiles(files);
+      renderFileHistory(files);
+    } else {
+      const response = await fetch(`/api/imports?id=${encodeURIComponent(latestBooking.importId)}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Không xoá được file booking.');
+      await loadFileHistory();
+    }
+    await saveOrigin('booking', null);
+    batchKey = null;
+    await loadDashboard();
+    await loadChanges();
+  } else {
+    if (isStaticPages) {
+      writeJson(`planner-source-${kind}`, null);
+    } else {
+      const response = await fetch(`/api/sources?kind=${kind}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Không xoá được file.');
+    }
+    sourceState[kind] = { ...EMPTY_SOURCE };
+    await saveOrigin(kind, null);
+    renderWarehouse();
+  }
+  showToast(`Đã xoá file của mục ${title}.`);
 }
 
 async function loadLatestAiReport() {
@@ -725,7 +859,7 @@ document.querySelector('#overviewView').addEventListener('click', async (event) 
 });
 
 // Reads a booking workbook (from a file or a link) and stores it; returns the new import id.
-async function importBooking(buffer, filename, origin = null) {
+async function importBooking(buffer, filename, origin = null, { quiet = false } = {}) {
   const workbook = readWorkbook(buffer);
   const { rows, days } = readBooking(workbook);
   if (!rows.length) throw new Error('Không tìm thấy dữ liệu booking hợp lệ (sheet TH hoặc LEADTIME).');
@@ -765,10 +899,13 @@ async function importBooking(buffer, filename, origin = null) {
     hasChanges = Boolean(payload.changes);
     await loadFileHistory();
   }
-  batchKey = null;
+  // A refresh of the same file keeps the week the planner is looking at.
+  if (!quiet) batchKey = null;
   await loadDashboard();
   await loadChanges();
-  if (hasChanges) {
+  if (hasChanges && quiet) {
+    showToast('File booking vừa được cập nhật và có thay đổi: xem ở nút “Thay đổi booking”.', 'info');
+  } else if (hasChanges) {
     openChanges(importId);
     showToast('File booking có thay đổi so với bản trước, hãy kiểm tra.', 'info');
   } else {
@@ -803,42 +940,97 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
 });
 
 const sourcesPanel = document.querySelector('.sources-panel');
-sourcesPanel.addEventListener('click', (event) => {
-  const refresh = event.target.closest('[data-refresh-source]');
-  if (refresh) withBusyButton(refresh, 'Đang tải', () => refreshSource(refresh.dataset.refreshSource));
+const sourceForms = (kind) => [...sourcesPanel.querySelectorAll(`[data-link-form="${kind}"], [data-path-form="${kind}"]`)];
+
+function toggleSourceForm(kind, type) {
+  const card = sourcesPanel.querySelector(`[data-source="${kind}"]`);
+  const form = card.querySelector(`[data-${type}-form]`);
+  const opening = form.hidden;
+  sourceForms(kind).forEach((item) => { item.hidden = true; });
+  card.querySelectorAll('[data-toggle-form]').forEach((button) => button.setAttribute('aria-expanded', 'false'));
+  if (!opening) return;
+  form.hidden = false;
+  card.querySelector(`[data-toggle-form="${type}"]`).setAttribute('aria-expanded', 'true');
+  const input = form.querySelector('input');
+  const origin = originState[kind]?.origin;
+  if (!input.value && originType(origin) === type) input.value = origin;
+  input.focus();
+}
+
+sourcesPanel.addEventListener('click', async (event) => {
   const pick = event.target.closest('[data-pick-file]');
   if (pick) sourcesPanel.querySelector(`[data-file-input="${pick.dataset.pickFile}"]`).click();
-  const toggle = event.target.closest('[data-toggle-link]');
-  if (toggle) {
-    const form = sourcesPanel.querySelector(`[data-link-form="${toggle.dataset.toggleLink}"]`);
-    form.hidden = !form.hidden;
-    if (!form.hidden) form.elements.url.focus();
+  const toggle = event.target.closest('[data-toggle-form]');
+  if (toggle) toggleSourceForm(toggle.dataset.kind, toggle.dataset.toggleForm);
+  const browse = event.target.closest('[data-browse-path]');
+  if (browse) {
+    const path = await window.planner.pickExcelPath();
+    if (path) sourcesPanel.querySelector(`[data-path-form="${browse.dataset.browsePath}"] input`).value = path;
   }
+  const update = event.target.closest('[data-update-source]');
+  if (update) {
+    const kind = update.dataset.updateSource;
+    const origin = originState[kind]?.origin;
+    // A file picked by hand has nowhere to be read from again: choose the new copy.
+    if (!origin) sourcesPanel.querySelector(`[data-file-input="${kind}"]`).click();
+    else withBusyButton(update, 'Đang cập nhật', () => useOrigin(kind, origin));
+  }
+  const remove = event.target.closest('[data-delete-source]');
+  // renderSources runs after the busy state ends so an emptied card keeps Xoá disabled.
+  if (remove) withBusyButton(remove, 'Đang xoá', () => deleteSource(remove.dataset.deleteSource)).then(renderSources);
 });
 sourcesPanel.addEventListener('change', async (event) => {
   const kind = event.target.dataset.fileInput;
   const file = event.target.files?.[0];
   if (!kind || !file) return;
   const button = sourcesPanel.querySelector(`[data-pick-file="${kind}"]`);
-  await withBusyButton(button, 'Đang đọc', async () => importSource(kind, await file.arrayBuffer(), file.name));
+  await withBusyButton(button, 'Đang đọc', async () => {
+    await importSource(kind, await file.arrayBuffer(), file.name);
+    // The source is now this file; stop refreshing from an older link or path.
+    if (originState[kind]) await saveOrigin(kind, null);
+    renderSources();
+  });
   event.target.value = '';
 });
 sourcesPanel.addEventListener('submit', async (event) => {
-  const kind = event.target.dataset.linkForm;
+  const form = event.target;
+  const kind = form.dataset.linkForm || form.dataset.pathForm;
   if (!kind) return;
   event.preventDefault();
-  const url = event.target.elements.url.value;
-  const button = event.submitter || event.target.querySelector('[type="submit"]');
-  await withBusyButton(button, 'Đang tải', async () => {
-    const { buffer, filename } = await downloadFromLink(url, { viaServer: !isStaticPages });
-    await importSource(kind, buffer, filename, url);
-    event.target.reset();
-    event.target.hidden = true;
+  const origin = (form.elements.url || form.elements.path).value.trim();
+  const button = event.submitter || form.querySelector('[type="submit"]');
+  await withBusyButton(button, 'Đang đọc', async () => {
+    await useOrigin(kind, origin);
+    form.reset();
+    form.hidden = true;
+    sourcesPanel.querySelectorAll(`[data-kind="${kind}"]`).forEach((toggle) => toggle.setAttribute('aria-expanded', 'false'));
+    renderSources();
   });
+});
+document.querySelectorAll('[data-day-select]').forEach((select) => select.addEventListener('change', () => {
+  dayKey = select.value;
+  writeJson('planner-day', dayKey);
+  expandedModelKey = null;
+  modelLimit = PAGE_SIZE;
+  renderWarehouse();
+  renderCheck();
+}));
+document.querySelector('#planCards').addEventListener('click', (event) => {
+  const card = event.target.closest('[data-plan-tab]');
+  if (!card) return;
+  planTab = card.dataset.planTab;
+  writeJson('planner-plan-tab', planTab);
+  renderPlanResults();
+});
+document.querySelector('#planSearch').addEventListener('input', (event) => {
+  planQuery = event.target.value;
+  renderPlanResults();
 });
 document.querySelectorAll('[data-batch-select]').forEach((select) => select.addEventListener('change', () => {
   batchKey = select.value;
+  dayKey = '';
   writeJson('planner-batch', batchKey);
+  writeJson('planner-day', dayKey);
   expandedModelKey = null;
   modelLimit = PAGE_SIZE;
   renderWarehouse();
@@ -1027,11 +1219,12 @@ renderFileHistory();
 // Browser mode reads the booking history before it can pick the newest booking.
 (async () => {
   await loadFileHistory();
+  await loadOrigins();
   await loadSources();
-  if (!isStaticPages) {
-    refreshStaleSources();
-    setInterval(refreshStaleSources, AUTO_REFRESH_MINUTES * 60_000);
-  }
   await loadDashboard();
   await loadChanges();
+  if (!isStaticPages) {
+    pollOrigins();
+    setInterval(pollOrigins, PATH_POLL_SECONDS * 1000);
+  }
 })();

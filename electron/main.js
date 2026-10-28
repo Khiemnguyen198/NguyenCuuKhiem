@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAppServer } from '../server/standalone.js';
@@ -43,6 +43,15 @@ function createWindow(port) {
 
 app.whenReady().then(async () => {
   registerUpdater();
+  // "Đường dẫn" sources: pick a workbook (also on a shared drive) and keep its full path.
+  ipcMain.handle('dialog:pick-excel', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Chọn file Excel',
+      properties: ['openFile'],
+      filters: [{ name: 'Excel', extensions: ['xlsx', 'xlsm', 'xlsb', 'xls'] }]
+    });
+    return result.canceled ? null : result.filePaths[0];
+  });
   try {
     const { port } = await createAppServer({
       staticDir: join(app.getAppPath(), 'dist-desktop'),
