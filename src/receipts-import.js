@@ -47,7 +47,10 @@ function findHeader(table) {
 
 export function readReceiptsWorkbook(buffer) {
   const workbook = XLSX.read(buffer, { type: 'array' });
-  const names = [PREFERRED_SHEET, ...workbook.SheetNames.filter((name) => name !== PREFERRED_SHEET)];
+  const normPref = PREFERRED_SHEET.toUpperCase();
+  const prefName = (workbook.SheetNames || []).find((name) => name.trim().toUpperCase() === normPref);
+  const otherNames = (workbook.SheetNames || []).filter((name) => name !== prefName);
+  const names = prefName ? [prefName, ...otherNames] : (workbook.SheetNames || []);
   for (const name of names) {
     const sheet = workbook.Sheets[name];
     if (!sheet) continue;

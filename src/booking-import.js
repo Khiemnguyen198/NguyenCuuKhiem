@@ -28,8 +28,10 @@ export function toIsoDate(value) {
   const text = String(value).trim();
   const vietnamese = text.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
   if (vietnamese) return `${vietnamese[3]}-${pad(vietnamese[2])}-${pad(vietnamese[1])}`;
+  const ymd = text.match(/^(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})(?:[T\s].*)?$/);
+  if (ymd) return `${ymd[1]}-${pad(ymd[2])}-${pad(ymd[3])}`;
   const date = new Date(text);
-  return Number.isNaN(date.getTime()) ? text : date.toISOString().slice(0, 10);
+  return Number.isNaN(date.getTime()) ? text : `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 export const label = (cell) => String(cell ?? '').replace(/\s+/g, ' ').trim().toUpperCase();
@@ -149,11 +151,29 @@ export function readWorkbook(buffer) {
   return XLSX.read(buffer, { type: 'array' });
 }
 
+export function getSheetByName(workbook, targetName) {
+  if (!workbook?.Sheets) return null;
+  if (workbook.Sheets[targetName]) return workbook.Sheets[targetName];
+  const target = String(targetName).trim().toUpperCase();
+  const key = Object.keys(workbook.Sheets).find((name) => name.trim().toUpperCase() === target);
+  return key ? workbook.Sheets[key] : null;
+}
+
+export function getSheetKey(workbook, targetName) {
+  if (!workbook?.Sheets) return null;
+  if (workbook.Sheets[targetName]) return targetName;
+  const target = String(targetName).trim().toUpperCase();
+  return Object.keys(workbook.Sheets).find((name) => name.trim().toUpperCase() === target) || null;
+}
+
 // TH is assembled by hand from the four lead-time sheets, so compare them before trusting TH.
 export function crossCheckSheets(workbook) {
-  const leadTimeSheets = LEAD_TIME_SHEETS.filter(([sheetName]) => workbook.Sheets[sheetName]);
-  if (!workbook.Sheets.TH) return { checked: false, mismatches: [], dailyTotals: [] };
-  if (!leadTimeSheets.length) return { checked: true, mismatches: [], dailyTotals: checkDailyTotals(readRowsFromSheet(workbook.Sheets.TH, 4)) };
+  const thSheet = getSheetByName(workbook, 'TH');
+  const leadTimeSheets = LEAD_TIME_SHEETS
+    .map(([sheetName, leadTime]) => [getSheetByName(workbook, sheetName), leadTime])
+    .filter(([sheet]) => Boolean(sheet));
+  if (!thSheet) return { checked: false, mismatches: [], dailyTotals: [] };
+  if (!leadTimeSheets.length) return { checked: true, mismatches: [], dailyTotals: checkDailyTotals(readRowsFromSheet(thSheet, 4)) };
   const key = (row) => [row.po, row.ref, row.color, row.leadTime].map((value) => String(value ?? '').trim().toUpperCase()).join('|');
   const totals = (rows) => rows.reduce((map, row) => {
     const entry = map.get(key(row)) || { row, quantity: 0 };
@@ -161,8 +181,8 @@ export function crossCheckSheets(workbook) {
     map.set(key(row), entry);
     return map;
   }, new Map());
-  const summary = totals(readRowsFromSheet(workbook.Sheets.TH, 4).rows);
-  const sources = totals(leadTimeSheets.flatMap(([sheetName, leadTime]) => readRowsFromSheet(workbook.Sheets[sheetName], 3, leadTime).rows));
+  const summary = totals(readRowsFromSheet(thSheet, 4).rows);
+  const sources = totals(leadTimeSheets.flatMap(([sheet, leadTime]) => readRowsFromSheet(sheet, 3, leadTime).rows));
   const mismatches = [];
   const label = (entry, note) => ({ row: entry.row.line ? `LINE ${entry.row.line}` : '—', po: entry.row.po || 'Chưa có PO', ref: entry.row.ref, quantity: entry.quantity, note });
   for (const [rowKey, entry] of summary) {
@@ -173,7 +193,7 @@ export function crossCheckSheets(workbook) {
   for (const [rowKey, entry] of sources) {
     if (!summary.has(rowKey)) mismatches.push(label(entry, `thiếu trong TH (${entry.row.leadTime})`));
   }
-  return { checked: true, mismatches, dailyTotals: checkDailyTotals(readRowsFromSheet(workbook.Sheets.TH, 4)) };
+  return { checked: true, mismatches, dailyTotals: checkDailyTotals(readRowsFromSheet(thSheet, 4)) };
 }
 
 const shortDate = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '');
@@ -205,10 +225,12 @@ export function readBooking(workbook) {
 }
 
 function readBookingSheets(workbook) {
-  if (workbook.Sheets.TH) return readRowsFromSheet(workbook.Sheets.TH, 4, null, 'TH');
+  const thKey = getSheetKey(workbook, 'TH');
+  if (thKey) return readRowsFromSheet(workbook.Sheets[thKey], 4, null, thKey);
   const parts = LEAD_TIME_SHEETS
-    .filter(([sheetName]) => workbook.Sheets[sheetName])
-    .map(([sheetName, leadTime]) => readRowsFromSheet(workbook.Sheets[sheetName], 3, leadTime, sheetName));
+    .map(([sheetName, leadTime]) => [getSheetKey(workbook, sheetName), leadTime])
+    .filter(([sheetKey]) => Boolean(sheetKey))
+    .map(([sheetKey, leadTime]) => readRowsFromSheet(workbook.Sheets[sheetKey], 3, leadTime, sheetKey));
   // Each lead-time sheet has its own return dates, so the combined view keeps one column per
   // pick-up date and re-keys every row's allocations to it.
   const dates = [...new Set(parts.flatMap((part) => part.days.map((day) => day.date)))].sort();

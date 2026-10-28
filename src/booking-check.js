@@ -34,7 +34,9 @@ const round = (value) => Math.round(value * 100) / 100;
 const number = (value) => new Intl.NumberFormat('vi-VN').format(round(Number(value) || 0));
 
 export function checkBookingSheet(workbook, sheetName = 'TH') {
-  const sheet = workbook.Sheets[sheetName];
+  const norm = String(sheetName).trim().toUpperCase();
+  const actualName = Object.keys(workbook.Sheets || {}).find((name) => name.trim().toUpperCase() === norm) || sheetName;
+  const sheet = workbook.Sheets[actualName];
   if (!sheet) return { sheet: sheetName, checked: false, issues: [] };
   const table = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true, blankrows: true });
   const headerIndex = findHeaderRow(table, 4);

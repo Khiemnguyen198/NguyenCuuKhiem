@@ -9,6 +9,11 @@ const RELEASE_NOTES = {
   '0.0.7': [
     'Hiển thị ghi chú bản đang dùng ngay trên số phiên bản.',
     'Có thể thu gọn ghi chú và đọc khi không có mạng.'
+  ],
+  '0.0.8': [
+    'Sửa lỗi lệch ngày do múi giờ địa phương (UTC+7) trong toIsoDate.',
+    'Nhận diện tên sheet linh hoạt (bỏ qua khoảng trắng thừa và chữ hoa/thường).',
+    'Chống lệch số lượng phân bổ FIFO và chia ngày chi tiết.'
   ]
 };
 

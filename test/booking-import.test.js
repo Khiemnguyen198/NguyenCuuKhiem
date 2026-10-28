@@ -6,7 +6,23 @@ import { crossCheckSheets, extractBookingRows, readWorkbook, summarizeBooking, t
 test('converts Excel date serials without a timezone shift', () => {
   assert.equal(toIsoDate(46321), '2026-10-26');
   assert.equal(toIsoDate('28/10/2026'), '2026-10-28');
+  assert.equal(toIsoDate('28-10-2026'), '2026-10-28');
+  assert.equal(toIsoDate('28.10.2026'), '2026-10-28');
+  assert.equal(toIsoDate('2026/10/28'), '2026-10-28');
+  assert.equal(toIsoDate('2026-10-28'), '2026-10-28');
+  assert.equal(toIsoDate('2026-10-28T00:00:00.000Z'), '2026-10-28');
   assert.equal(toIsoDate(''), null);
+});
+
+test('reads sheet with case-insensitive name and trailing spaces', () => {
+  const header = ['LINE', 'CUS', 'PO', ' MODEL CODE ', 'LINE QTY', 'HÌNH IN', ' INPUT ', ' OUTPUT ', ' SỐ PHIẾU ', ' SLHĐ TỔNG ', 'Leadtime'];
+  const sheet = XLSX.utils.aoa_to_sheet([header, [], ['KẾ HOẠCH BOOK IN'], [], header,
+    [1, 'DECATHLON', 'PO1', 'M1', 100, 2, 46321, 46322, 73611, 1660, '2 ngày']
+  ]);
+  const workbook = { SheetNames: [' TH '], Sheets: { ' TH ': sheet } };
+  const rows = extractBookingRows(readWorkbook(XLSX.write(workbook, { type: 'array', bookType: 'xlsx' })));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].modelCode, 'M1');
 });
 
 test('reads lead-time sheets and summarizes customers, codes and contracts', () => {

@@ -29,8 +29,10 @@ const COLUMNS = {
 };
 
 export function readWarehouseWorkbook(buffer) {
-  const workbook = XLSX.read(buffer, { type: 'array', sheets: [SUMMARY_SHEET] });
-  const sheet = workbook.Sheets[SUMMARY_SHEET];
+  const workbook = XLSX.read(buffer, { type: 'array' });
+  const norm = SUMMARY_SHEET.replace(/\s+/g, ' ').trim().toUpperCase();
+  const sheetName = (workbook.SheetNames || []).find((name) => String(name).replace(/\s+/g, ' ').trim().toUpperCase() === norm);
+  const sheet = sheetName ? workbook.Sheets[sheetName] : null;
   if (!sheet) throw new Error(`Không tìm thấy sheet “${SUMMARY_SHEET}” trong file kho.`);
   return readWarehouseSheet(sheet);
 }

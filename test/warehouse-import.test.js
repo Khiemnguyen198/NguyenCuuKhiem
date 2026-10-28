@@ -28,3 +28,11 @@ test('groups warehouse lines by ticket and keeps the slowest print', async () =>
   const product = units.find((unit) => unit.model === '357446' && unit.received);
   assert.deepEqual([product.received, product.delivered, product.good, product.prints.length], [1000, 900, 899, 2]);
 });
+
+test('reads workbook even if sheet name has trailing spaces or different casing', async () => {
+  const { readWarehouseWorkbook } = await import('../src/warehouse-import.js');
+  const wb = { SheetNames: [' TỔNG HỢP '], Sheets: { ' TỔNG HỢP ': sheetRows() } };
+  const buffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+  const lines = readWarehouseWorkbook(buffer);
+  assert.equal(lines.length, 4);
+});

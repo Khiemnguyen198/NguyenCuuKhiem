@@ -118,9 +118,9 @@ function pourIntoDays(row) {
     .sort((a, b) => Number(a[0]) - Number(b[0]));
   const result = Object.fromEntries(days.map(([index]) => [index, { received: 0, delivered: 0, good: 0 }]));
   for (const field of ['received', 'delivered', 'good']) {
-    let left = row[`${field}Fifo`] || 0;
+    let left = Math.round(row[`${field}Fifo`] || 0);
     for (const [index, quantity] of days) {
-      const share = Math.min(left, quantity);
+      const share = Math.min(left, Math.round(quantity));
       result[index][field] = share;
       left -= share;
     }
@@ -235,10 +235,10 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
   // Inside each lot, PO rows are filled in their own due-date order.
   for (const lot of lots) {
     for (const field of ['received', 'delivered', 'good']) {
-      let left = lot[field];
+      let left = Math.round(lot[field] || 0);
       for (const row of lot.rows) {
-        const share = Math.min(left, Number(row.lineQuantity || 0));
-        row[`${field}Fifo`] = Math.round(share);
+        const share = Math.min(left, Math.round(Number(row.lineQuantity || 0)));
+        row[`${field}Fifo`] = share;
         left -= share;
       }
     }
