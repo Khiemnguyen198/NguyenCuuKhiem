@@ -87,6 +87,28 @@ function renderSheetIssues(sheetCheck, booking) {
   }).join('');
 }
 
+// Rows the reader fixed or could not fix by Mã hàng + Model (booking-columns.js).
+function renderRepairs(repairs) {
+  if (!repairs?.length) return '';
+  const applied = repairs.filter((repair) => repair.applied);
+  const review = repairs.filter((repair) => !repair.applied);
+  const table = (items) => `<div class="table-wrap"><table class="delivery-table repair-table">
+    <thead><tr><th class="th-left">Ô</th><th class="th-left">PO / Mã hàng</th><th class="th-left">Cột</th><th class="th-left">Trong file</th><th class="th-left">App dùng</th><th class="th-left">Lý do</th></tr></thead>
+    <tbody>${items.map((repair) => `<tr>
+      <td class="delivery-table__left">${escapeHtml(repair.sheet || 'TH')} · dòng ${number(repair.sheetRow)}</td>
+      <td class="delivery-table__left">${escapeHtml(repair.po || '—')}<small>${escapeHtml(repair.ref || '')}</small></td>
+      <td class="delivery-table__left">${escapeHtml(repair.field)}</td>
+      <td class="delivery-table__left">${escapeHtml(repair.found)}</td>
+      <td class="delivery-table__left"><strong>${escapeHtml(repair.used)}</strong></td>
+      <td class="delivery-table__left repair-reason">${escapeHtml(repair.reason)}</td>
+    </tr>`).join('')}</tbody></table></div>`;
+  return `<section class="check-block"><h3>Đọc theo Mã hàng + Model <span class="check-count">${number(repairs.length)}</span></h3>
+    <p class="check-note">App đọc cột theo tên (không phân biệt dấu, hoa thường, tên gọi khác như “Mã hàng”, “Model”, “Màu”) và đối chiếu từng dòng với các model của mã hàng đó trong chính file booking.</p>
+    ${applied.length ? `<h4 class="repair-heading repair-heading--ok"><i class="ph ph-wrench"></i>Đã tự sửa ${number(applied.length)} chỗ</h4>${table(applied)}` : ''}
+    ${review.length ? `<h4 class="repair-heading repair-heading--warn"><i class="ph ph-warning"></i>Cần người kiểm tra ${number(review.length)} chỗ (app không tự đoán)</h4>${table(review)}` : ''}
+  </section>`;
+}
+
 function sourceRow(title, source, required) {
   if (source?.filename) {
     return `<li class="check-ok"><i class="ph ph-check-circle"></i><strong>${title}</strong><span title="${escapeHtml(source.filename)}">${escapeHtml(source.filename)}</span><small>${escapeHtml(formatFileDate(source.importedAt))}</small></li>`;
@@ -157,6 +179,7 @@ export function renderCheckReport({ booking, summary, sources, aiReport, sheetCh
     <section class="check-block"><h3>Cần lưu ý ${warnings.length ? `<span class="check-count">${number(warnings.length)}</span>` : ''}</h3>
       ${warnings.length ? `<ul class="check-warnings">${warnings.map((text) => `<li><i class="ph ph-warning"></i>${escapeHtml(text)}</li>`).join('')}</ul>` : '<p class="check-note">Không có gì cần lưu ý.</p>'}
     </section>
+    ${renderRepairs(sheetCheck?.repairs)}
     <section class="check-block"><h3>Lỗi trong sheet TH ${issueCount ? `<span class="check-count">${number(issueCount)}</span>` : ''}${issueCount ? '<button type="button" class="link-refresh issue-download" data-download-issues><i class="ph ph-download-simple"></i>Tải danh sách lỗi (cả file)</button>' : ''}</h3>
       ${renderSheetIssues(sheetCheck, booking)}
       ${issueCount ? '<p class="check-note">Đây là lỗi trong dữ liệu nhập của sheet TH. Khi xuất, PXI TRẢ gõ nhầm năm được sửa (ô có ghi chú giá trị cũ); SLHĐ TỔNG, TỔNG NGÀY, TỔNG TUẦN luôn được tính lại; các lỗi còn lại cần người kế hoạch sửa trong file booking.</p>' : ''}

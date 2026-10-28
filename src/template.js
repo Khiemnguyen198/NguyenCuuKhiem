@@ -96,6 +96,7 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, ca
               <button type="button" class="icon-button" data-week-step="-1" aria-label="Tuần trước"><i class="ph ph-caret-left"></i></button>
               <select data-batch-select aria-label="Chọn tuần booking"></select>
               <button type="button" class="icon-button" data-week-step="1" aria-label="Tuần sau"><i class="ph ph-caret-right"></i></button>
+              <select data-day-select aria-label="Chọn ngày trong tuần"></select>
               <button type="button" class="secondary-button calendar-check" data-check><i class="ph ph-list-checks"></i>Lỗi file &amp; xuất file</button>
               <button type="button" class="icon-button" id="closeCalendar" aria-label="Ẩn lịch"><i class="ph ph-x"></i></button>
             </div>
@@ -192,6 +193,7 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, ca
       </footer>
     </section>
   </div>
+  <button type="button" class="export-fab" id="exportFab" hidden><i class="ph ph-microsoft-excel-logo"></i><span><strong>Xuất file</strong><small id="exportFabScope"></small></span></button>
   <div class="modal" id="orderModal" aria-hidden="true">
     <button class="modal__backdrop" data-close-order aria-label="Đóng"></button>
     <section class="settings-dialog changes-dialog order-dialog" role="dialog" aria-modal="true" aria-labelledby="orderTitle">

@@ -52,7 +52,8 @@ Phát hành bản mới:
    - Hàng trong file nhận/giao không thuộc lô nào hiện ở bộ lọc **Ngoài booking**, không tính vào tổng.
 4. **Tuần booking** và **Ngày**: chọn cả tuần hoặc một ngày trong tuần (T2…CN, kèm số dòng) để lọc đơn hàng theo ngày.
    **Tuần booking**: booking luôn được theo dõi theo từng tuần (ngày PXC CHUYỂN, Thứ Hai–Chủ Nhật), mặc định là tuần hiện tại. Số lượng là phần phân bổ vào các ngày trong tuần; nhận/đã in của mỗi dòng được rót FIFO tiếp xuống từng ngày, nên tuần chỉ nhận phần của mình.
-5. **Lịch booking theo tuần**: nút **Kiểm tra** ở ô Booking (Tổng quan) mở lịch của tuần đang chọn ngay trên trang: cột là Thứ 2 → CN (kèm số đơn và số lượng mỗi ngày), mỗi đơn (lô) là một vùng trải từ ngày PXC được phân bổ tới ngày hạn giao, tô màu theo trạng thái (chưa nhận / thiếu BTP / đang in / giao đủ / trễ hạn). Có nút tuần trước / sau, tìm kiếm và lọc. Bấm vào vùng (hoặc tên đơn) để xem chi tiết: SLHĐ, SL trong tuần, nhận, giao, tồn, lỗi, hạn giao, điểm cần chú ý và từng dòng PO với các ngày phân bổ. Nút **Lỗi file & xuất file** trên lịch mở bảng kiểm tra lỗi và xuất file.
+5. **Lịch booking theo tuần**: nút **Kiểm tra** ở ô Booking (Tổng quan) mở lịch của tuần đang chọn ngay trên trang: cột là Thứ 2 → CN (kèm số đơn và số lượng mỗi ngày), mỗi đơn (lô) là một vùng trải từ ngày PXC được phân bổ tới ngày hạn giao, tô màu theo trạng thái (chưa nhận / thiếu BTP / đang in / giao đủ / trễ hạn). Có nút tuần trước / sau, tìm kiếm và lọc. Bấm vào vùng (hoặc tên đơn) để xem chi tiết: SLHĐ, SL trong tuần, nhận, giao, tồn, lỗi, hạn giao, điểm cần chú ý và từng dòng PO với các ngày phân bổ. Nút **Lỗi file & xuất file** trên lịch mở bảng kiểm tra lỗi và xuất file. Chọn một ngày (bấm vào đầu cột ngày trên lịch hoặc ô **Ngày**) thì lịch, kết quả tổng hợp, Theo mã hàng và Kế hoạch cùng lọc theo ngày đó.
+   Nút bong bóng **Xuất file** ở góc dưới bên phải có trên mọi trang: xuất ngay TH + CAN DOI của tuần/ngày đang chọn; nếu dữ liệu chưa đủ để xuất, nút mở bảng kiểm tra để xem lý do.
 6. **Kiểm tra file**: sau khi nhập, nút **Kiểm tra file** mở bảng tổng hợp dữ liệu chuẩn bị xuất của tuần đã chọn — nguồn file, số dòng / lô / số lượng tuần, nhận, đã in, còn thiếu, cách nối (phiếu / FIFO), các điểm cần lưu ý và xem trước các dòng. Bấm **Xuất file** trong bảng này để tải một sheet `TH` giống file booking, chỉ gồm các dòng và các ngày của tuần; sau các cột ngày là Model, Màu, SL trong tuần, Nhận BTP, Đã in (giao), Còn thiếu và các cột của lô.
    - Mục **Lỗi trong sheet TH** chỉ rõ từng ô sai trong file booking: SLHĐ TỔNG trống / sai (kể cả ô gõ tay không có công thức), TỔNG NGÀY sai (kèm công thức đang có), PXI TRẢ sớm hơn PXC, OUTPUT rơi vào Chủ Nhật hoặc sớm hơn INPUT, thiếu PO, LINE QTY / HÌNH IN / leadtime không hợp lệ, dòng trùng, TH lệch sheet LEADTIME — với giá trị trong file và giá trị đúng; lỗi của tuần đang chọn xếp lên đầu.
    - File xuất sửa sẵn SLHĐ TỔNG, TỔNG NGÀY và PXI TRẢ sai năm (ô đã sửa có ghi chú giá trị cũ), và thêm sheet **ĐỐI CHIẾU**: mỗi lỗi trong phạm vi xuất với ô trong file booking, ô trong file xuất, giá trị cũ / mới và kết quả Đã sửa / Cần kiểm tra.
@@ -67,6 +68,14 @@ Nhập bằng **đường dẫn** (app desktop / `npm run dev`): dán đường 
 Danh sách các file booking đã nhập nằm bên dưới.
 
 Nhập bằng link: khi chạy `npm run dev`, máy chủ tải file từ link (SharePoint/OneDrive tự thêm `download=1` và giữ cookie khách của link “Bất kỳ ai có link”; Google Sheets tự xuất `.xlsx`). File nhận/giao nạp từ link được **cập nhật lại từ link** khi bấm nút, khi mở trang và mỗi 30 phút khi trang đang mở, vì bên giao nhận sửa file SharePoint liên tục. Link chỉ dành cho người trong tổ chức thì không tải được. Bản Sites chỉ đọc được link cho phép tải chéo (CORS), nên không tự cập nhật từ SharePoint.
+
+## File booking sai cột, sai hàng
+
+App bám theo **Mã hàng (REF) + Model (mã 7 số)** để đọc file booking cho chắc:
+- **Tên cột linh hoạt**: không phân biệt dấu, hoa/thường, khoảng trắng; nhận cả tên gọi khác (“Mã hàng” = REF, “Model” = MODEL CODE, “Màu” = COLOR, “Line qty”, “Số phiếu”, “Lead time”…). Hàng tiêu đề được dò trong 30 dòng đầu, nên chèn thêm dòng phía trên vẫn đọc được.
+- **Tự sửa khi chắc chắn** (dựa vào chính file booking): REF và MODEL CODE gõ đổi chỗ; MODEL CODE trống thì lấy mã 7 số trong ô COLOR, hoặc mã model có ở một ô khác của dòng (dữ liệu lệch cột), hoặc model duy nhất của mã hàng đó; REF trống thì lấy mã hàng mà model đó có ở các dòng khác.
+- **Không tự đoán khi mơ hồ**: mã hàng có nhiều model mà dòng không có mã 7 số; MODEL CODE khác mã đầu ô COLOR; một dòng ghi mã hàng khác với mã hàng của model đó ở các dòng khác; dòng thiếu LINE (vẫn được tính, không còn bị bỏ qua).
+- Mọi chỗ đã sửa / cần xem được liệt kê trong **Kiểm tra file → Đọc theo Mã hàng + Model** với sheet, số dòng, giá trị trong file, giá trị app dùng và lý do. File nhận / giao sẽ áp dụng cách này sau.
 
 ## Theo mã hàng
 
