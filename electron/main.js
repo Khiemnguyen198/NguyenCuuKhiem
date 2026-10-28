@@ -1,6 +1,8 @@
 import { app, BrowserWindow, dialog, shell } from 'electron';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createAppServer } from '../server/standalone.js';
+import { registerUpdater } from './updater.js';
 
 // Desktop shell: runs the planner's server (SQLite, link downloads) inside the app and shows
 // the built pages in a window. Data lives in the user's app-data folder, not next to the app.
@@ -19,7 +21,7 @@ function createWindow(port) {
     title: APP_TITLE,
     backgroundColor: '#f7fafc',
     autoHideMenuBar: true,
-    webPreferences: { contextIsolation: true, sandbox: true }
+    webPreferences: { contextIsolation: true, sandbox: true, preload: join(dirname(fileURLToPath(import.meta.url)), 'preload.cjs') }
   });
   mainWindow.loadURL(`http://127.0.0.1:${port}/`);
   // Links to other sites open in the normal browser, not inside the app.
@@ -40,6 +42,7 @@ function createWindow(port) {
 }
 
 app.whenReady().then(async () => {
+  registerUpdater();
   try {
     const { port } = await createAppServer({
       staticDir: join(app.getAppPath(), 'dist-desktop'),

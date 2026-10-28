@@ -82,6 +82,7 @@ export function readDayColumns(table) {
       returnDate: rows.return == null ? null : toIsoDate(table[rows.return][column]) || null,
       fileTotal: typeof fileTotal === 'number' ? fileTotal : null,
       // Sheet rows of the PXI TRẢ and TỔNG NGÀY labels, for pointing at a wrong cell.
+      pickupRow: rows.pickup,
       returnRow: rows.return ?? null,
       totalRow: rows.day ?? null
     });

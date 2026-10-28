@@ -1,8 +1,7 @@
-import { MACHINE_SUGGESTIONS } from './config-ai.js';
 import { STATUS_FILTERS } from './models-view.js';
 import { renderSourceCards } from './sources.js';
 
-export function appTemplate({ isStaticPages, dayLabel, weekLabel }) {
+export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion }) {
   return `
   <div class="app-shell">
     <aside class="sidebar">
@@ -11,8 +10,11 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel }) {
         <button class="nav__item nav__item--active" data-page="Tổng quan"><i class="ph ph-house"></i><span>Tổng quan</span></button>
         <button class="nav__item" data-page="Mã hàng"><i class="ph ph-list-magnifying-glass"></i><span>Theo mã hàng</span></button>
         <button class="nav__item" data-page="Kế hoạch"><i class="ph ph-calendar-dots"></i><span>Kế hoạch</span></button>
-        <button class="nav__item" data-page="Cấu hình"><i class="ph ph-gear-six"></i><span>Cấu hình</span></button>
       </nav>
+      <div class="app-update">
+        <span id="appVersion">Phiên bản v${appVersion}</span>
+        <button type="button" class="app-update__button" id="updateButton" title="Kiểm tra và cài phiên bản mới" hidden><i class="ph ph-arrow-circle-up"></i><span>Cập nhật</span></button>
+      </div>
       <div class="sidebar__foot"><span class="status-dot"></span>${isStaticPages ? 'Lưu trên trình duyệt' : 'SQLite đang hoạt động'}</div>
     </aside>
 
@@ -111,52 +113,6 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel }) {
           <section class="file-history-card file-history-card--original">
             <header><span class="history-icon"><i class="ph ph-file-lock"></i></span><div><h3>File gốc chưa chỉnh sửa</h3><p>Bản tải lên được bảo toàn</p></div><span class="history-count" id="originalBadge">0</span></header>
             <div class="file-history-list" id="originalFiles"></div>
-          </section>
-        </div>
-      </section>
-
-      <section class="config-view" id="configView" hidden>
-        <div class="config-intro">
-          <div><p class="section-heading__overline">ĐỊNH MỨC SẢN XUẤT</p><h2>Danh mục thời gian chuẩn</h2><p>Nhập Excel hoặc tạo thủ công. AI local sẽ chuẩn hóa dữ liệu để dùng cho kế hoạch.</p></div>
-          <div class="config-actions">
-            <button class="secondary-button" id="addStandard"><i class="ph ph-plus"></i>Nhập thủ công</button>
-            <button class="primary-button" id="importStandards"><i class="ph ph-file-xls"></i>Nhập Excel cấu hình</button>
-            <input id="standardsFileInput" type="file" accept=".xlsx,.xls" hidden />
-          </div>
-        </div>
-        <div class="config-workspace">
-          <aside class="standard-library">
-            <div class="standard-library__head"><div><strong>Danh mục định mức</strong><span id="standardsCount">0 cấu hình</span></div><label><i class="ph ph-magnifying-glass"></i><input id="standardSearch" type="search" placeholder="Tìm Oval 18…" /></label></div>
-            <div class="standard-list" id="standardList"></div>
-          </aside>
-          <section class="standard-detail">
-            <div class="standard-detail__empty" id="standardEmpty"><i class="ph ph-sliders-horizontal"></i><strong>Chọn một định mức</strong><span>Thông tin đầy đủ sẽ hiển thị tại đây.</span></div>
-            <form id="standardForm" hidden>
-              <header class="standard-detail__head">
-                <div><div class="standard-source" id="standardSource">NHẬP THỦ CÔNG</div><h3 id="standardTitle">Định mức mới</h3><p id="standardUpdated">Chưa lưu</p></div>
-                <span class="lock-state" id="standardLockState"><i class="ph ph-lock-key"></i>Đang khóa</span>
-              </header>
-              <fieldset id="standardFields" disabled>
-                <div class="field-wide standard-name-field">
-                  <label><span>Tên máy / định mức</span><input name="name" list="machineSuggestions" required placeholder="Chọn máy hoặc nhập tên mới" /></label>
-                  <datalist id="machineSuggestions">${MACHINE_SUGGESTIONS.map((machine) => `<option value="${machine}"></option>`).join('')}</datalist>
-                  <div class="machine-suggestions" id="machineSuggestionPanel" hidden><span>Máy có tại nhà máy</span><div>${MACHINE_SUGGESTIONS.map((machine) => `<button type="button" data-machine-name="${machine}">${machine}</button>`).join('')}</div></div>
-                </div>
-                <label><span>Phút / lượt hình</span><input name="minutesPerImpression" type="number" min="0.0001" step="0.0001" required /></label>
-                <label><span>Phút setup / PO</span><input name="setupMinutesPerPo" type="number" min="0" step="0.1" /></label>
-                <label><span>Số máy</span><input name="machineCount" type="number" min="1" step="1" /></label>
-                <label><span>Số ca / ngày</span><input name="shiftsPerDay" type="number" min="1" step="1" /></label>
-                <label><span>Phút / ca</span><input name="minutesPerShift" type="number" min="1" step="1" /></label>
-                <label><span>Hiệu suất (%)</span><input name="efficiencyPercent" type="number" min="1" max="100" step="0.1" /></label>
-                <label><span>Số ngày kế hoạch</span><input name="planningDays" type="number" min="1" max="6" step="1" /></label>
-                <label class="field-wide"><span>Ghi chú</span><textarea name="note" rows="3" placeholder="Thông tin bổ sung…"></textarea></label>
-              </fieldset>
-              <footer class="standard-detail__footer">
-                <button type="button" class="secondary-button" id="unlockStandard"><i class="ph ph-lock-key-open"></i>Mở khóa để sửa</button>
-                <button type="submit" class="primary-button" id="saveStandard" hidden><i class="ph ph-floppy-disk"></i>Lưu thay đổi</button>
-                <button type="button" class="apply-standard" id="applyStandard"><i class="ph ph-check-circle"></i>Dùng để tính kế hoạch</button>
-              </footer>
-            </form>
           </section>
         </div>
       </section>
