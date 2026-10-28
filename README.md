@@ -41,7 +41,7 @@ Phát hành bản mới:
 
 **Nhập → Kiểm tra → Xử lý → Xuất file**
 
-1. **Tổng quan → Nguồn dữ liệu** có 3 ô, mỗi ô nhận file Excel hoặc link:
+1. **Tổng quan → Nguồn dữ liệu** có 3 ô; mỗi ô có 3 nút cùng hàng **Chọn file / Dán link / Đường dẫn** và chân ô có **Cập nhật file**, **Xoá** (ô Booking có thêm **Kiểm tra**):
    - **Booking**: file booking của khách (sheet `TH`, hoặc `LEADTIME 1/2/3/5 NGÀY`).
    - **Nhận**: file nhập BTP (sheet `DATA`, ví dụ `INKAVA_XUẤT NHẬP BTP NEW.xlsx`): số đã nhận và ngày nhận.
    - **Giao**: file kế toán kho (sheet `TỔNG HỢP`): tổng giao, hỏng in, lỗi vải, giao đạt.
@@ -50,10 +50,20 @@ Phát hành bản mới:
    - Hàng nhận/giao có số phiếu khớp lô → gán thẳng cho lô đó.
    - Phần còn lại của mỗi Mã + Model (+ Mùa) được rót **FIFO**: lô có hạn giao sớm nhất được lấp trước, rồi trong lô chia xuống từng dòng PO theo hạn giao.
    - Hàng trong file nhận/giao không thuộc lô nào hiện ở bộ lọc **Ngoài booking**, không tính vào tổng.
-4. **Tuần booking**: booking luôn được theo dõi theo từng tuần (ngày PXC CHUYỂN, Thứ Hai–Chủ Nhật), mặc định là tuần hiện tại. Số lượng là phần phân bổ vào các ngày trong tuần; nhận/đã in của mỗi dòng được rót FIFO tiếp xuống từng ngày, nên tuần chỉ nhận phần của mình.
+4. **Tuần booking** và **Ngày**: chọn cả tuần hoặc một ngày trong tuần (T2…CN, kèm số dòng) để lọc đơn hàng theo ngày.
+   **Tuần booking**: booking luôn được theo dõi theo từng tuần (ngày PXC CHUYỂN, Thứ Hai–Chủ Nhật), mặc định là tuần hiện tại. Số lượng là phần phân bổ vào các ngày trong tuần; nhận/đã in của mỗi dòng được rót FIFO tiếp xuống từng ngày, nên tuần chỉ nhận phần của mình.
 5. **Kiểm tra file**: sau khi nhập, nút **Kiểm tra file** mở bảng tổng hợp dữ liệu chuẩn bị xuất của tuần đã chọn — nguồn file, số dòng / lô / số lượng tuần, nhận, đã in, còn thiếu, cách nối (phiếu / FIFO), các điểm cần lưu ý và xem trước các dòng. Bấm **Xuất file** trong bảng này để tải một sheet `TH` giống file booking, chỉ gồm các dòng và các ngày của tuần; sau các cột ngày là Model, Màu, SL trong tuần, Nhận BTP, Đã in (giao), Còn thiếu và các cột của lô.
    - Mục **Lỗi trong sheet TH** chỉ rõ từng ô sai trong file booking: SLHĐ TỔNG trống / sai (kể cả ô gõ tay không có công thức), TỔNG NGÀY sai (kèm công thức đang có), PXI TRẢ sớm hơn PXC, OUTPUT rơi vào Chủ Nhật hoặc sớm hơn INPUT, thiếu PO, LINE QTY / HÌNH IN / leadtime không hợp lệ, dòng trùng, TH lệch sheet LEADTIME — với giá trị trong file và giá trị đúng; lỗi của tuần đang chọn xếp lên đầu.
    - File xuất sửa sẵn SLHĐ TỔNG, TỔNG NGÀY và PXI TRẢ sai năm (ô đã sửa có ghi chú giá trị cũ), và thêm sheet **ĐỐI CHIẾU**: mỗi lỗi trong phạm vi xuất với ô trong file booking, ô trong file xuất, giá trị cũ / mới và kết quả Đã sửa / Cần kiểm tra.
+
+Nhập bằng **đường dẫn** (app desktop / `npm run dev`): dán đường dẫn đầy đủ tới file trên máy hoặc máy chủ nội bộ, ví dụ `\\server\KHO\KE TOAN KHO.xlsm`, `Z:\Kho\Nhap.xlsx` hoặc `/Volumes/KHO/…` (app desktop có nút chọn file để lấy đường dẫn). Đọc được `.xlsx`, `.xlsm` (có macro — chỉ đọc giá trị, không chạy macro), `.xlsb`, `.xls`. Ứng dụng kiểm tra giờ sửa file mỗi 60 giây và tự đọc lại ngay khi file được lưu; booking đọc lại cũng được so với bản trước và báo ở nút **Thay đổi booking**. Chỉ máy đang chạy ứng dụng mới đọc được đường dẫn. **Xoá** bỏ file khỏi mục đó (booking: xoá lần nhập đang hiện, bản trước hiện lại) và ngừng tự cập nhật; file gốc không bị đụng tới.
+
+**Kế hoạch** hiện kết quả tổng hợp chi tiết của tuần / ngày đang chọn, bấm 4 thẻ để chuyển bảng:
+- **Từ file booking**: số lượng cần làm, ngày nhận (INPUT), hạn giao (OUTPUT), leadtime của từng đơn (lô).
+- **Từ file nhận**: đã nhận bao nhiêu BTP, còn thiếu, % đã nhận, ngày nhận cuối.
+- **Từ file giao**: đã giao, giao đạt, lỗi, còn phải giao, % hoàn thành.
+- **Tổng hợp cả 3 file**: đơn đã giao đủ trong tuần được **ghim cứng ở đầu**; các đơn còn lại xếp theo độ gấp với đã nhận BTP, đã giao BTP, **tồn BTP** (nhận − giao), hạn giao và **cần chú ý** (trễ hạn, sắp tới hạn, chưa nhận / thiếu BTP, tồn chưa giao, lỗi).
+Danh sách các file booking đã nhập nằm bên dưới.
 
 Nhập bằng link: khi chạy `npm run dev`, máy chủ tải file từ link (SharePoint/OneDrive tự thêm `download=1` và giữ cookie khách của link “Bất kỳ ai có link”; Google Sheets tự xuất `.xlsx`). File nhận/giao nạp từ link được **cập nhật lại từ link** khi bấm nút, khi mở trang và mỗi 30 phút khi trang đang mở, vì bên giao nhận sửa file SharePoint liên tục. Link chỉ dành cho người trong tổ chức thì không tải được. Bản Sites chỉ đọc được link cho phép tải chéo (CORS), nên không tự cập nhật từ SharePoint.
 

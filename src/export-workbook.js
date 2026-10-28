@@ -13,7 +13,9 @@ export function sortByUrgency(items) {
 }
 
 export function exportFilename(now = new Date(), batch = null) {
-  const week = batch ? `_TUAN_${batch.from.slice(8, 10)}${batch.from.slice(5, 7)}-${batch.to.slice(8, 10)}${batch.to.slice(5, 7)}` : '';
+  const ddmm = (iso) => `${iso.slice(8, 10)}${iso.slice(5, 7)}`;
+  // One picked day of the week, or the whole week.
+  const week = !batch ? '' : batch.from === batch.to ? `_NGAY_${ddmm(batch.from)}` : `_TUAN_${ddmm(batch.from)}-${ddmm(batch.to)}`;
   return `TONG_HOP_GIAO_HANG${week}_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`;
 }
 

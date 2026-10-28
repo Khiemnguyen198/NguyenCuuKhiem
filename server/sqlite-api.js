@@ -1,5 +1,7 @@
 import { mkdirSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFile, stat } from 'node:fs/promises';
+import { basename, isAbsolute, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { analyzeBookingRows, LOCAL_AI_VERSION } from '../src/local-ai.js';
 import { DEMO_DASHBOARD } from '../src/demo-data.js';
@@ -100,10 +102,47 @@ function openDatabase(dataDirectory = resolve('.data')) {
       SELECT 'deliveries', filename, imported_at, lines_json FROM warehouse_snapshots
       WHERE NOT EXISTS (SELECT 1 FROM source_snapshots WHERE kind = 'deliveries')
       ORDER BY id DESC LIMIT 1;
+    CREATE TABLE IF NOT EXISTS source_origins (
+      kind TEXT PRIMARY KEY CHECK (kind IN ('booking', 'receipts', 'deliveries')),
+      origin TEXT NOT NULL,
+      origin_mtime TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 }
 
 const SOURCE_KINDS = new Set(['receipts', 'deliveries']);
+const ORIGIN_KINDS = new Set(['booking', ...SOURCE_KINDS]);
+
+// Where each input is refreshed from: a share link or a file path, plus the file's modified
+// time when it was last read, so a changed file is read again.
+function listOrigins() {
+  const origins = Object.fromEntries([...ORIGIN_KINDS].map((kind) => [kind, null]));
+  for (const row of database.prepare('SELECT kind, origin, origin_mtime AS mtime FROM source_origins').all()) {
+    origins[row.kind] = { origin: row.origin, mtime: row.mtime };
+  }
+  // Links saved before this table existed sit on the newest snapshot.
+  for (const kind of SOURCE_KINDS) {
+    const origin = !origins[kind] && database.prepare('SELECT origin FROM source_snapshots WHERE kind = ? ORDER BY id DESC LIMIT 1').get(kind)?.origin;
+    if (origin) origins[kind] = { origin, mtime: null };
+  }
+  return origins;
+}
+
+const EXCEL_FILE = /\.(xlsx|xlsm|xlsb|xls)$/i;
+
+// A workbook on this computer or on a shared drive: C:\…, \\server\share\…, /Volumes/…,
+// or a file:// URL. Only Excel files, so the route cannot be used to read anything else.
+export function excelPath(input) {
+  let path = String(input || '').trim().replace(/^"(.*)"$/, '$1');
+  if (/^file:\/\//i.test(path)) path = fileURLToPath(path);
+  if (!isAbsolute(path) && !/^(\\\\[^\\]+\\|[a-z]:[\\/])/i.test(path)) throw new Error('Hãy nhập đường dẫn đầy đủ, ví dụ \\\\server\\thu-muc\\file.xlsm hoặc /Volumes/…/file.xlsx.');
+  if (!EXCEL_FILE.test(path)) throw new Error('Đường dẫn phải trỏ tới file Excel (.xlsx, .xlsm, .xlsb, .xls).');
+  return path;
+}
+
+// Only the computer running the server may read its files (the dev server listens on the LAN).
+const isLoopback = (request) => /^(127\.|::1$|::ffff:127\.)/.test(request.socket?.remoteAddress || '');
 
 function latestSource(kind) {
   const row = database.prepare(`
@@ -365,6 +404,11 @@ export function registerApi(use, { dataDirectory } = {}) {
     const kind = new URL(request.url, 'http://local').searchParams.get('kind');
     if (!SOURCE_KINDS.has(kind)) return sendJson(response, 400, { error: 'Loại nguồn dữ liệu không hợp lệ.' });
     if (request.method === 'GET') return sendJson(response, 200, latestSource(kind));
+    if (request.method === 'DELETE') {
+      database.prepare('DELETE FROM source_snapshots WHERE kind = ?').run(kind);
+      database.prepare('DELETE FROM source_origins WHERE kind = ?').run(kind);
+      return sendJson(response, 200, latestSource(kind));
+    }
     if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
     try {
       const payload = JSON.parse(await readBody(request));
@@ -376,6 +420,58 @@ export function registerApi(use, { dataDirectory } = {}) {
       return sendJson(response, 201, latestSource(kind));
     } catch (error) {
       return sendJson(response, 500, { error: error.message || 'Không thể lưu nguồn dữ liệu.' });
+    }
+  });
+
+  use('/api/origins', async (request, response) => {
+    if (request.method === 'GET') return sendJson(response, 200, listOrigins());
+    if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
+    try {
+      const { kind, origin, mtime } = JSON.parse(await readBody(request));
+      if (!ORIGIN_KINDS.has(kind)) return sendJson(response, 400, { error: 'Loại nguồn dữ liệu không hợp lệ.' });
+      if (origin) {
+        database.prepare(`
+          INSERT INTO source_origins(kind, origin, origin_mtime) VALUES (?, ?, ?)
+          ON CONFLICT(kind) DO UPDATE SET origin = excluded.origin, origin_mtime = excluded.origin_mtime, updated_at = CURRENT_TIMESTAMP
+        `).run(kind, String(origin), mtime || null);
+      } else {
+        database.prepare('DELETE FROM source_origins WHERE kind = ?').run(kind);
+      }
+      return sendJson(response, 200, listOrigins());
+    } catch (error) {
+      return sendJson(response, 400, { error: error.message || 'Không lưu được nguồn dữ liệu.' });
+    }
+  });
+
+  // Reads a workbook from a path (local disk or shared drive). `?stat=1` only reports its
+  // modified time, which the page polls to notice when someone saves the file.
+  use('/api/read-path', async (request, response) => {
+    if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
+    if (!isLoopback(request)) return sendJson(response, 403, { error: 'Chỉ đọc được đường dẫn trên máy đang chạy ứng dụng.' });
+    let path;
+    try {
+      path = excelPath(JSON.parse(await readBody(request)).path);
+    } catch (error) {
+      return sendJson(response, 400, { error: error.message });
+    }
+    try {
+      const info = await stat(path);
+      if (!info.isFile()) return sendJson(response, 400, { error: 'Đường dẫn không phải là file.' });
+      const mtime = info.mtime.toISOString();
+      if (new URL(request.url, 'http://local').searchParams.get('stat') === '1') return sendJson(response, 200, { mtime, size: info.size, filename: basename(path) });
+      if (info.size > 60_000_000) return sendJson(response, 413, { error: 'File quá lớn (trên 60 MB).' });
+      const bytes = await readFile(path);
+      response.statusCode = 200;
+      response.setHeader('Content-Type', 'application/octet-stream');
+      response.setHeader('X-Filename', encodeURIComponent(basename(path)));
+      response.setHeader('X-Mtime', mtime);
+      return response.end(bytes);
+    } catch (error) {
+      const reason = error.code === 'ENOENT' ? 'Không tìm thấy file (kiểm tra đường dẫn hoặc ổ mạng đã kết nối chưa).'
+        : error.code === 'EACCES' || error.code === 'EPERM' ? 'Không có quyền đọc file này.'
+        : error.code === 'EBUSY' ? 'File đang bị khoá bởi chương trình khác, thử lại sau.'
+        : error.message;
+      return sendJson(response, 400, { error: reason });
     }
   });
 
@@ -409,6 +505,14 @@ export function registerApi(use, { dataDirectory } = {}) {
   });
 
   use('/api/imports', async (request, response) => {
+    if (request.method === 'DELETE') {
+      // Removing a booking file drops its rows, history, check and change report with it.
+      const importId = Number(new URL(request.url, 'http://local').searchParams.get('id'));
+      const removed = importId ? database.prepare('DELETE FROM imports WHERE id = ?').run(importId) : { changes: 0 };
+      if (!removed.changes) return sendJson(response, 404, { error: 'Không tìm thấy file booking.' });
+      if (!database.prepare('SELECT 1 FROM imports LIMIT 1').get()) database.prepare("DELETE FROM source_origins WHERE kind = 'booking'").run();
+      return sendJson(response, 200, latestDashboard());
+    }
     if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
     try {
       const payload = JSON.parse(await readBody(request));
