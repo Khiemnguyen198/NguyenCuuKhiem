@@ -26,8 +26,9 @@ button { cursor: pointer; }
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 190px minmax(0, 1fr); }
 .sidebar { position: sticky; top: 0; height: 100vh; color: #fff; background: var(--navy-950); display: flex; flex-direction: column; box-shadow: 7px 0 30px rgb(8 35 63 / 10%); z-index: 10; }
 /* Center the padded square artwork inside the short header, not an auto-sized grid row. */
-.brand { height: 101px; flex: none; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #fff; }
-.brand img { width: 260px; height: 260px; flex: none; max-width: none; display: block; object-fit: contain; }
+.brand { height: 101px; flex: none; display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--navy-950); isolation: isolate; }
+/* Turn the black wordmark white; screen blends its inverted background into the sidebar. */
+.brand img { width: 260px; height: 260px; flex: none; max-width: none; display: block; object-fit: contain; filter: grayscale(1) invert(1) contrast(2); mix-blend-mode: screen; }
 .nav { display: grid; gap: 5px; }
 .nav__item { position: relative; width: 100%; border: 0; display: flex; align-items: center; gap: 15px; padding: 16px 22px; color: #d9e6f2; background: transparent; text-align: left; font-weight: 560; font-size: 15px; transition: background .2s, color .2s; }
 .nav__item i { font-size: 22px; }

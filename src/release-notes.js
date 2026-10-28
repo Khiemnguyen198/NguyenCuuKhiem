@@ -19,6 +19,10 @@ const RELEASE_NOTES = {
     'Bộ lọc nhanh và tìm kiếm tức thời theo PO, Model, Màu, Khách hàng và Trạng thái.',
     'Ghim ưu tiên nhận BTP thủ công (Manual Priority Pinning) cho các đơn hàng gấp.',
     'Xuất và in phiếu giao nhận BTP xưởng (khổ A4 chuẩn kèm 3 chữ ký trách nhiệm).'
+  ],
+  '0.0.10': [
+    'Cập nhật logo Inkava màu trắng tinh tế tiệp với màu nền thanh bên.',
+    'Tối ưu hiển thị giao diện và xuất bản đầy đủ cho Mac (Apple Silicon & Intel) và Windows.'
   ]
 };
 
