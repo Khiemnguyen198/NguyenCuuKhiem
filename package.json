@@ -7,13 +7,69 @@
     "dev": "vite",
     "build": "vite build",
     "test": "node --test",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:desktop": "vite build --mode desktop --outDir dist-desktop --emptyOutDir",
+    "desktop": "npm run build:desktop && electron .",
+    "dist:mac": "npm run build:desktop && electron-builder --mac dmg --arm64 --x64",
+    "dist:win": "npm run build:desktop && electron-builder --win nsis --x64"
   },
   "dependencies": {
     "@phosphor-icons/web": "^2.1.2",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "electron": "44.7.1",
+    "electron-builder": "26.17.0",
     "vite": "^7.1.12"
+  },
+  "description": "Inkava Production Planner — đối chiếu booking với nhận / giao bán thành phẩm",
+  "main": "electron/main.js",
+  "author": "Khiemnguyen198",
+  "build": {
+    "appId": "vn.inkava.planner",
+    "productName": "Inkava Planner",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "package.json",
+      "electron/**",
+      "server/**",
+      "src/**/*.js",
+      "dist-desktop/**",
+      "!src/**/*.test.js"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.business",
+      "identity": "-",
+      "hardenedRuntime": false
+    },
+    "dmg": {
+      "title": "Inkava Planner"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Inkava Planner"
+    }
   }
 }

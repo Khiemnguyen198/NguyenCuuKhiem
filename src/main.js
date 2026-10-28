@@ -21,7 +21,9 @@ import { renderChangeList, renderChangeReport, unreviewedCount } from './changes
 import { checkIssues, renderCheckReport } from './check-view.js';
 import { checkBookingSheet } from './booking-check.js';
 
-const isStaticPages = import.meta.env.PROD || import.meta.env.BASE_URL !== '/';
+// Production builds are static (browser storage) except the desktop build (`--mode desktop`),
+// which talks to the SQLite server bundled in the app.
+const isStaticPages = (import.meta.env.PROD && import.meta.env.MODE !== 'desktop') || import.meta.env.BASE_URL !== '/';
 
 const fallbackDashboard = DEMO_DASHBOARD;
 
