@@ -61,39 +61,55 @@ export function filterCalendar(orders, { status = 'all', query = '' } = {}) {
 
 const tone = (item) => (item.overdue ? 'late' : item.status);
 
+const SHORT_WEEKDAYS = { CN: 'CN', 'Thứ 2': 'T2', 'Thứ 3': 'T3', 'Thứ 4': 'T4', 'Thứ 5': 'T5', 'Thứ 6': 'T6', 'Thứ 7': 'T7' };
+
+// Compact week grid: days with no order shrink to a narrow column, orders are grouped by the
+// day they start, each line is one order with its region and a flag on the due date.
 export function renderCalendar({ columns, orders, shownOrders, selectedDate = null, today = null }) {
   const totals = columns.map((_, column) => orders.reduce((sum, order) => sum + order.cells[column], 0));
   const counts = columns.map((_, column) => orders.filter((order) => order.cells[column] > 0).length);
-  const head = columns.map((column, position) => `
-    <div class="cal-day${column.sunday ? ' cal-day--sunday' : ''}${column.date === today ? ' cal-day--today' : ''}${column.date === selectedDate ? ' cal-day--selected' : ''}${column.index == null ? ' cal-day--off' : ''}">
-      <span>${column.weekday}${column.date === today ? ' · hôm nay' : ''}</span><strong>${shortDate(column.date)}</strong>
-      <small>${counts[position] ? `${number(counts[position])} đơn · ${number(totals[position])}` : 'Không có đơn'}</small>
-    </div>`).join('');
+  const busy = columns.map((_, column) => counts[column] > 0 || orders.some((order) => order.due === column));
+  const template = `200px ${busy.map((used) => (used ? 'minmax(84px, 1fr)' : '46px')).join(' ')}`;
+  const dayClass = (column, prefix) => `${column.sunday ? ` ${prefix}--sunday` : ''}${column.date === today ? ` ${prefix}--today` : ''}${column.date === selectedDate ? ` ${prefix}--selected` : ''}`;
+  const head = columns.map((column, position) => busy[position]
+    ? `<div class="cal-day${dayClass(column, 'cal-day')}" title="${number(counts[position])} đơn · ${number(totals[position])} sản phẩm">
+        <strong>${SHORT_WEEKDAYS[column.weekday]} ${shortDate(column.date)}</strong>
+        <small>${counts[position] ? `${number(counts[position])} đơn · ${number(totals[position])}` : 'chỉ hạn giao'}</small>
+      </div>`
+    : `<div class="cal-day cal-day--empty${dayClass(column, 'cal-day')}" title="${column.weekday} ${shortDate(column.date)}: không có đơn"><strong>${SHORT_WEEKDAYS[column.weekday]}</strong><small>${shortDate(column.date)}</small></div>`).join('');
   // Day columns behind each line, so Sunday, today and the picked day read down the calendar.
-  const backdrop = columns.map((column, position) => `<span class="cal-cell${column.sunday ? ' cal-cell--sunday' : ''}${column.date === today ? ' cal-cell--today' : ''}${column.date === selectedDate ? ' cal-cell--selected' : ''}" style="grid-column:${position + 2}"></span>`).join('');
-  const rows = shownOrders.map(({ item, cells, start, end, due }) => {
+  const backdrop = columns.map((column, position) => `<span class="cal-cell${dayClass(column, 'cal-cell')}" style="grid-column:${position + 2}"></span>`).join('');
+  let group = null;
+  const lines = [];
+  for (const { item, cells, start, end, due } of shownOrders) {
+    if (start !== group) {
+      group = start;
+      const inGroup = shownOrders.filter((order) => order.start === start);
+      lines.push(`<div class="cal-group">${columns[start].weekday} ${shortDate(columns[start].date)} · ${number(inGroup.length)} đơn bắt đầu · ${number(inGroup.reduce((sum, order) => sum + order.quantity, 0))} sản phẩm</div>`);
+    }
     const segments = cells.slice(start, end + 1).map((value, offset) => {
-      const column = start + offset;
-      return `<span class="cal-seg${value ? '' : ' cal-seg--gap'}">${value ? number(value) : column === due ? '' : '·'}${column === due ? `<i class="ph-fill ph-flag-pennant" title="Hạn giao"></i>${value ? '' : '<em>Hạn</em>'}` : ''}</span>`;
+      const flag = start + offset === due ? '<i class="ph ph-flag-pennant" aria-label="Hạn giao"></i>' : '';
+      return `<span class="cal-seg${value ? '' : ' cal-seg--gap'}">${value ? number(value) : ''}${flag}</span>`;
     }).join('');
     const dueMarker = due != null && (due < start || due > end)
-      ? `<span class="cal-due" style="grid-column:${due + 2}" title="Hạn giao ${shortDate(item.dueDate)}"><i class="ph-fill ph-flag-pennant"></i>Hạn</span>`
+      ? `<span class="cal-due" style="grid-column:${due + 2}" title="Hạn giao ${shortDate(item.dueDate)}"><i class="ph ph-flag-pennant"></i></span>`
       : '';
-    return `<div class="cal-row">${backdrop}
-      <button type="button" class="cal-label" data-order="${escapeHtml(item.key)}">${customerLogo(item.customer)}<span><strong>${escapeHtml(item.model || '—')}</strong><small>${escapeHtml(item.modelCode || '')} · ${escapeHtml(colorName(item.color) || '')}</small></span></button>
-      <button type="button" class="cal-bar cal-bar--${tone(item)}" style="grid-column:${start + 2} / ${end + 3}" data-order="${escapeHtml(item.key)}" title="${escapeHtml(`${item.model} · ${STATUS_COPY[item.status].label} · hạn ${shortDate(item.dueDate)}`)}">${segments}</button>
+    const color = colorName(item.color) || '';
+    lines.push(`<div class="cal-row">${backdrop}
+      <button type="button" class="cal-label" data-order="${escapeHtml(item.key)}" title="${escapeHtml(`${item.customer} · ${item.model} · ${item.modelCode} · ${color}`)}"><strong>${escapeHtml(item.model || '—')}</strong><small>${escapeHtml(color || item.modelCode || '')}</small></button>
+      <button type="button" class="cal-bar cal-bar--${tone(item)}" style="grid-column:${start + 2} / ${end + 3}" data-order="${escapeHtml(item.key)}" title="${escapeHtml(`${item.model} · ${STATUS_COPY[item.status].label} · ${number(item.contract)} sp · hạn ${shortDate(item.dueDate)}`)}">${segments}</button>
       ${dueMarker}
-    </div>`;
-  }).join('');
-  return `<div class="cal-scroll"><div class="cal-grid">
-    <div class="cal-head"><div class="cal-corner">Đơn (mã hàng · model · màu)</div>${head}</div>
-    ${rows || '<div class="cal-empty">Không có đơn nào khớp bộ lọc trong tuần này.</div>'}
+    </div>`);
+  }
+  return `<div class="cal-scroll"><div class="cal-grid" style="--cal-cols:${template}">
+    <div class="cal-head"><div class="cal-corner">Đơn hàng</div>${head}</div>
+    ${lines.join('') || '<div class="cal-empty">Không có đơn nào khớp bộ lọc trong tuần này.</div>'}
   </div></div>`;
 }
 
 export function renderLegend() {
   return [['waiting', 'Chưa nhận BTP'], ['short-input', 'Thiếu BTP'], ['printing', 'Đang in'], ['done', 'Đã giao đủ'], ['late', 'Trễ hạn']]
-    .map(([key, label]) => `<span class="cal-legend cal-legend--${key}">${label}</span>`).join('') + '<span class="cal-legend-flag"><i class="ph-fill ph-flag-pennant"></i>Hạn giao</span>';
+    .map(([key, label]) => `<span class="cal-legend cal-legend--${key}">${label}</span>`).join('') + '<span class="cal-legend-flag"><i class="ph ph-flag-pennant"></i>Hạn giao</span><span class="cal-legend-hint">Bấm vào đơn để xem chi tiết</span>';
 }
 
 // The order behind a calendar region: the whole lot, its share in this week, and every PO row

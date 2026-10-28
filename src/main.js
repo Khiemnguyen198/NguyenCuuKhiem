@@ -353,8 +353,8 @@ function renderCalendarView() {
   const selectedDate = dayKey === '' ? null : bookingDetail.days[Number(dayKey)]?.date;
   grid.innerHTML = renderCalendar({ columns, orders, shownOrders, selectedDate, today: todayIso() });
   const total = orders.reduce((sum, order) => sum + order.quantity, 0);
-  document.querySelector('#calendarTitle').textContent = `Lịch booking · ${week.label}`;
-  document.querySelector('#calendarMeta').textContent = `${formatNumber.format(shownOrders.length)} / ${formatNumber.format(orders.length)} đơn · ${formatNumber.format(Math.round(total))} sản phẩm trong tuần · bấm vào vùng của đơn để xem chi tiết.`;
+  document.querySelector('#calendarTitle').textContent = week.label;
+  document.querySelector('#calendarMeta').textContent = `${shownOrders.length === orders.length ? '' : `${formatNumber.format(shownOrders.length)} / `}${formatNumber.format(orders.length)} đơn · ${formatNumber.format(Math.round(total))} sản phẩm trong tuần`;
   document.querySelectorAll('[data-calendar-filter]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.calendarFilter === calendarFilter.status)));
   const weeks = bookingWeeks();
   const position = weeks.findIndex((item) => item.key === week.key);

@@ -93,21 +93,21 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, ca
         </section>
         <section class="delivery-summary booking-calendar" id="bookingCalendar" hidden>
           <div class="delivery-summary__heading">
-            <div><p class="section-heading__overline">KIỂM TRA FILE BOOKING · LỊCH THEO TUẦN</p><h2 id="calendarTitle">Lịch booking</h2><p id="calendarMeta">Mỗi đơn (lô) là một vùng trên lịch, trải qua các ngày PXC được phân bổ. Bấm vào vùng để xem chi tiết.</p></div>
+            <div><p class="section-heading__overline">LỊCH BOOKING THEO TUẦN</p><h2 id="calendarTitle">Lịch booking</h2><p id="calendarMeta"></p></div>
             <div class="calendar-actions">
               <button type="button" class="icon-button" data-week-step="-1" aria-label="Tuần trước"><i class="ph ph-caret-left"></i></button>
               <select data-batch-select aria-label="Chọn tuần booking"></select>
               <button type="button" class="icon-button" data-week-step="1" aria-label="Tuần sau"><i class="ph ph-caret-right"></i></button>
-              <button type="button" class="primary-button" data-check><i class="ph ph-list-checks"></i>Lỗi file &amp; xuất file</button>
+              <button type="button" class="secondary-button calendar-check" data-check><i class="ph ph-list-checks"></i>Lỗi file &amp; xuất file</button>
               <button type="button" class="icon-button" id="closeCalendar" aria-label="Ẩn lịch"><i class="ph ph-x"></i></button>
             </div>
           </div>
           <div class="model-filters calendar-filters">
             <label class="model-search"><i class="ph ph-magnifying-glass"></i><input id="calendarSearch" type="search" placeholder="Tìm khách hàng, mã hàng, model, màu, PO…" /></label>
             <div class="status-filters" id="calendarFilters" role="group" aria-label="Lọc đơn trên lịch">${CALENDAR_FILTERS.map(([value, label]) => `<button type="button" data-calendar-filter="${value}"${value === 'all' ? ' aria-pressed="true"' : ''}>${label}</button>`).join('')}</div>
-            <div class="calendar-legend">${renderLegend()}</div>
           </div>
           <div id="calendarGrid"></div>
+          <div class="calendar-legend">${renderLegend()}</div>
         </section>
         <section class="delivery-summary">
           <div class="delivery-summary__heading">

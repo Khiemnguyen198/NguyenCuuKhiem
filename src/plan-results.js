@@ -131,7 +131,7 @@ function renderCombined(orders, totals) {
   const { done, open } = splitPinned(orders);
   const pinned = done.length
     ? `<div class="plan-pinned">
-        <div class="plan-pinned__head"><i class="ph-fill ph-push-pin"></i><strong>Đã làm xong trong tuần booking</strong><span>${number(done.length)} đơn giao đủ · luôn ghim ở đầu</span></div>
+        <div class="plan-pinned__head"><i class="ph ph-push-pin"></i><strong>Đã làm xong trong tuần booking</strong><span>${number(done.length)} đơn giao đủ · luôn ghim ở đầu</span></div>
         <div class="plan-pinned__body"><table class="delivery-table plan-table">${COMBINED_COLS}<tbody>${done.map(combinedRow).join('')}</tbody></table></div>
       </div>`
     : '<div class="plan-pinned plan-pinned--empty"><i class="ph ph-push-pin"></i>Chưa có đơn nào giao đủ trong tuần booking này.</div>';
