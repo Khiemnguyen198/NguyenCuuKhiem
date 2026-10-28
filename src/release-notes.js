@@ -14,6 +14,11 @@ const RELEASE_NOTES = {
     'Sửa lỗi lệch ngày do múi giờ địa phương (UTC+7) trong toIsoDate.',
     'Nhận diện tên sheet linh hoạt (bỏ qua khoảng trắng thừa và chữ hoa/thường).',
     'Chống lệch số lượng phân bổ FIFO và chia ngày chi tiết.'
+  ],
+  '0.0.9': [
+    'Bộ lọc nhanh và tìm kiếm tức thời theo PO, Model, Màu, Khách hàng và Trạng thái.',
+    'Ghim ưu tiên nhận BTP thủ công (Manual Priority Pinning) cho các đơn hàng gấp.',
+    'Xuất và in phiếu giao nhận BTP xưởng (khổ A4 chuẩn kèm 3 chữ ký trách nhiệm).'
   ]
 };
 

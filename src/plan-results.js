@@ -20,11 +20,24 @@ export function planOrders(items = []) {
   return items.filter((item) => !item.outsideBooking);
 }
 
-export function filterOrders(orders, query = '') {
+export function filterOrders(orders, query = '', filters = {}) {
   const text = query.trim().toLocaleLowerCase('vi-VN');
-  if (!text) return orders;
-  return orders.filter((order) => [order.customer, order.model, order.modelCode, order.color, order.season, order.ticket, ...order.rows.map((row) => row.po)]
-    .some((value) => contains(value, text)));
+  return orders.filter((order) => {
+    if (filters.customer && order.customer !== filters.customer) return false;
+    if (filters.status) {
+      if (filters.status === 'pinned' && !order.pinned) return false;
+      if (filters.status === 'open' && order.status === 'done') return false;
+      if (filters.status === 'done' && order.status !== 'done') return false;
+      if (filters.status === 'overdue' && !order.overdue) return false;
+      if (filters.status === 'short-input' && order.status !== 'short-input') return false;
+      if (filters.status === 'printing' && order.status !== 'printing') return false;
+      if (filters.status === 'waiting' && order.status !== 'waiting') return false;
+    }
+    if (!text) return true;
+    const pos = (order.rows || []).map((row) => `${row.po || ''} ${row.line || ''}`).join(' ');
+    return [order.customer, order.model, order.modelCode, order.color, order.season, order.ticket, pos]
+      .some((value) => contains(value, text));
+  });
 }
 
 const firstInput = (order) => order.rows.map((row) => row.inputDate).filter(Boolean).sort()[0] || null;
@@ -44,10 +57,17 @@ export function attentionOf(order) {
 }
 
 // Fully delivered orders lead the combined table and stay pinned; the rest follow by urgency.
+// Pinned open orders jump ahead of unpinned ones.
 export function splitPinned(orders) {
   const done = orders.filter((order) => order.status === 'done');
-  const open = sortByUrgency(orders.filter((order) => order.status !== 'done'));
-  return { done: done.sort((a, b) => String(a.dueDate || '').localeCompare(String(b.dueDate || ''))), open };
+  const open = orders.filter((order) => order.status !== 'done');
+  const pinned = open.filter((order) => order.pinned);
+  const unpinned = open.filter((order) => !order.pinned);
+  return {
+    done: done.sort((a, b) => String(a.dueDate || '').localeCompare(String(b.dueDate || ''))),
+    open: [...sortByUrgency(pinned), ...sortByUrgency(unpinned)],
+    pinnedCount: pinned.length
+  };
 }
 
 export function planTotals(orders) {
@@ -87,8 +107,17 @@ export function renderPlanCards(totals, activeTab) {
 }
 
 const identity = (order) => `
-  <td class="delivery-table__left"><span class="customer-chip">${customerLogo(order.customer)}<span>${escapeHtml(order.customer)}</span></span></td>
-  <td class="delivery-table__left"><strong>${escapeHtml(order.model || '—')}</strong></td>
+  <td class="delivery-table__left">
+    <div class="customer-cell-wrap">
+      <button type="button" class="pin-toggle${order.pinned ? ' pin-toggle--pinned' : ''}" data-pin-key="${escapeHtml(order.key)}" title="${order.pinned ? 'Bỏ ghim ưu tiên nhận BTP' : 'Ghim nhận BTP ưu tiên'}" aria-label="${order.pinned ? 'Bỏ ghim' : 'Ghim'}"><i class="ph ph-push-pin${order.pinned ? '-fill' : ''}"></i></button>
+      <span class="customer-chip">${customerLogo(order.customer)}<span>${escapeHtml(order.customer)}</span></span>
+    </div>
+  </td>
+  <td class="delivery-table__left">
+    <div class="model-cell-inner">
+      <strong>${escapeHtml(order.model || '—')}</strong>${order.pinned ? '<span class="pinned-tag" title="Lô được ưu tiên nhận BTP">Ưu tiên</span>' : ''}
+    </div>
+  </td>
   <td class="delivery-table__left">${escapeHtml(order.modelCode || '—')}</td>
   <td class="delivery-table__left">${escapeHtml(colorName(order.color) || '—')}</td>
   <td>${escapeHtml(order.season || '—')}</td>`;

@@ -98,3 +98,19 @@ test('a lot matched by ticket in the receiving file still gets FIFO deliveries',
   assert.deepEqual([lot('PO1').received, lot('PO1').delivered, lot('PO1').matchedBy], [90, 100, 'phiếu + FIFO']);
   assert.deepEqual([lot('PO2').received, lot('PO2').delivered], [0, 50]);
 });
+
+test('pinned lot receives FIFO deliveries ahead of earlier due date lot', () => {
+  const bookingRows = [
+    row('PO_EARLY', 100, '2026-11-01', { line: '10' }),
+    row('PO_LATE', 100, '2026-11-20', { line: '20' })
+  ];
+  const deliveryLines = [delivery({ received: 100, delivered: 100, good: 100 })];
+  const initialLots = buildLots(bookingRows);
+  const lateLotKey = initialLots.find((l) => l.rows.some((r) => r.po === 'PO_LATE')).key;
+  const { items } = summarizeLots({ bookingRows, deliveryLines, pinnedLots: new Set([lateLotKey]) });
+  const early = items.find((item) => item.rows.some((r) => r.po === 'PO_EARLY'));
+  const late = items.find((item) => item.rows.some((r) => r.po === 'PO_LATE'));
+  assert.equal(late.pinned, true);
+  assert.equal(late.good, 100);
+  assert.equal(early.good, 0);
+});

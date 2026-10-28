@@ -43,7 +43,21 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, ca
             <div class="batch-pickers"><label class="batch-picker"><span>Tuần booking</span><select data-batch-select aria-label="Chọn tuần booking"></select></label><label class="batch-picker batch-picker--day"><span>Ngày</span><select data-day-select aria-label="Chọn ngày trong tuần"></select></label></div>
           </div>
           <div class="plan-cards" id="planCards"></div>
-          <div class="model-filters"><label class="model-search"><i class="ph ph-magnifying-glass"></i><input id="planSearch" type="search" placeholder="Tìm khách hàng, mã hàng, model, màu, PO…" /></label><span class="plan-results__count" id="planResultsCount"></span></div>
+          <div class="model-filters">
+            <label class="model-search"><i class="ph ph-magnifying-glass"></i><input id="planSearch" type="search" placeholder="Tìm khách hàng, mã hàng, model, màu, PO…" /></label>
+            <select id="planCustomerFilter" aria-label="Lọc theo khách hàng"><option value="">Tất cả khách hàng</option></select>
+            <div class="status-filters" id="planStatusFilters" role="group" aria-label="Lọc trạng thái">
+              <button type="button" data-plan-status="" aria-pressed="true">Tất cả</button>
+              <button type="button" data-plan-status="pinned">📌 Ưu tiên</button>
+              <button type="button" data-plan-status="open">Chưa giao đủ</button>
+              <button type="button" data-plan-status="short-input">Thiếu BTP</button>
+              <button type="button" data-plan-status="printing">Đang in</button>
+              <button type="button" data-plan-status="overdue">Trễ hạn</button>
+              <button type="button" data-plan-status="done">Đã giao đủ</button>
+            </div>
+            <button type="button" class="secondary-button" id="openSlipBtn"><i class="ph ph-receipt"></i><span>Phiếu giao nhận BTP</span></button>
+            <span class="plan-results__count" id="planResultsCount"></span>
+          </div>
           <div id="planTable"></div>
         </section>
         <div class="plan-list-heading">
@@ -77,6 +91,7 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, ca
             <select data-batch-select aria-label="Chọn tuần booking"></select>
             <select data-day-select aria-label="Chọn ngày trong tuần"></select>
             <select id="customerFilter" aria-label="Lọc theo khách hàng"><option value="">Tất cả khách hàng</option></select>
+            <button type="button" class="secondary-button" id="openSlipFromModelsBtn"><i class="ph ph-receipt"></i><span>Phiếu giao nhận BTP</span></button>
             <div class="status-filters" id="statusFilters" role="group" aria-label="Lọc theo trạng thái">${STATUS_FILTERS.map(([value, label]) => `<button type="button" data-status="${value}"${value === 'open' ? ' aria-pressed="true"' : ''}>${label}<span data-status-count="${value}"></span></button>`).join('')}</div>
           </div>
           <div class="table-wrap"><table class="delivery-table model-table"><thead><tr><th>Khách hàng</th><th class="th-left">Mã hàng</th><th class="th-left">Model</th><th class="th-left">Màu</th><th>Mùa</th><th>SLHĐ tổng</th><th>Đã nhận</th><th>Đã in (giao)</th><th>Giao đạt</th><th>Lỗi</th><th>Còn thiếu</th><th>Hoàn thành</th><th>Hạn giao</th><th>Trạng thái</th></tr></thead><tbody id="modelBody"></tbody></table></div>
@@ -221,6 +236,21 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, ca
         <span class="change-reviewed" id="changeReviewed"></span>
         <button type="button" class="secondary-button" data-close-changes>Đóng</button>
         <button type="button" class="primary-button" id="markReviewed"><i class="ph ph-check-circle"></i>Đã kiểm tra</button>
+      </footer>
+    </section>
+  </div>
+  <div class="modal" id="slipModal" aria-hidden="true">
+    <button class="modal__backdrop" data-close-slip aria-label="Đóng"></button>
+    <section class="settings-dialog slip-dialog" role="dialog" aria-modal="true" aria-labelledby="slipTitle">
+      <header class="settings-dialog__header">
+        <div><p class="section-heading__overline">PHIẾU BÀN GIAO BÁN THÀNH PHẨM</p><h2 id="slipTitle">Phiếu giao nhận BTP</h2></div>
+        <button class="icon-button" data-close-slip aria-label="Đóng"><i class="ph ph-x"></i></button>
+      </header>
+      <div class="slip-content-wrap" id="slipContent"></div>
+      <footer class="settings-dialog__footer">
+        <button type="button" class="secondary-button" data-close-slip>Đóng</button>
+        <button type="button" class="secondary-button" id="downloadSlipExcel"><i class="ph ph-microsoft-excel-logo"></i>Xuất Excel</button>
+        <button type="button" class="primary-button" id="printSlipBtn"><i class="ph ph-printer"></i>In phiếu (Print)</button>
       </footer>
     </section>
   </div>

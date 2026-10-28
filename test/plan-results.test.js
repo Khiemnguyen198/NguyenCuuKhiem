@@ -52,6 +52,16 @@ test('filterOrders matches model, colour and PO', () => {
   assert.equal(filterOrders(planOrders(orders), 'black').length, 3);
 });
 
+test('filterOrders filters by status and customer', () => {
+  const list = [
+    order({ model: 'O1', customer: 'Nike', status: 'printing', pinned: true }),
+    order({ model: 'O2', customer: 'Adidas', status: 'waiting', pinned: false })
+  ];
+  assert.equal(filterOrders(list, '', { status: 'pinned' }).length, 1);
+  assert.equal(filterOrders(list, '', { customer: 'Nike' }).length, 1);
+  assert.equal(filterOrders(list, '', { customer: 'Puma' }).length, 0);
+});
+
 test('combined tab pins delivered orders above the others', () => {
   const html = renderPlanTab('combined', planOrders(orders));
   assert.ok(html.indexOf('plan-pinned') < html.indexOf('>LATE<'));

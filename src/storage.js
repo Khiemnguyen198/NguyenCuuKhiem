@@ -16,3 +16,12 @@ export function writeJson(key, value) {
     return false;
   }
 }
+
+export function getPinnedLots() {
+  const list = readJson('planner-pinned-lots', []);
+  return new Set(Array.isArray(list) ? list : []);
+}
+
+export function savePinnedLots(set) {
+  return writeJson('planner-pinned-lots', [...set]);
+}

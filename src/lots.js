@@ -107,6 +107,7 @@ export function finish(item, startOfToday) {
   item.daysToDue = item.dueDate ? Math.round((Date.parse(`${item.dueDate}T00:00:00Z`) - startOfToday) / DAY_MS) : null;
   item.overdue = item.status !== 'done' && item.daysToDue != null && item.daysToDue < 0;
   item.atRisk = item.status === 'waiting' && item.daysToDue != null && item.daysToDue >= 0 && item.daysToDue <= 3;
+  item.pinned = Boolean(item.pinned);
   return item;
 }
 
@@ -128,7 +129,7 @@ function pourIntoDays(row) {
   return result;
 }
 
-export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLines = [], today = new Date() } = {}) {
+export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLines = [], today = new Date(), pinnedLots = new Set() } = {}) {
   const startOfToday = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
   const lots = buildLots(bookingRows);
   const lotsByTicket = new Map(lots.filter((lot) => lot.ticket).map((lot) => [lot.ticket, lot]));
@@ -137,7 +138,14 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
   for (const lot of lots) {
     const key = `${lot.product}|${up(lot.season)}`;
     lotsByProductSeason.set(key, [...(lotsByProductSeason.get(key) || []), lot]);
-    Object.assign(lot, ZERO(), { prints: [], matched: new Set(), ticketFields: new Set(), pos: new Set(lot.rows.map((row) => row.po)) });
+    const isPinned = pinnedLots.has(lot.key);
+    Object.assign(lot, ZERO(), {
+      pinned: isPinned,
+      prints: [],
+      matched: isPinned ? new Set(['ghim']) : new Set(),
+      ticketFields: new Set(),
+      pos: new Set(lot.rows.map((row) => row.po))
+    });
   }
 
   // Warehouse units: one per product + season + ticket, reduced to the slowest print.
@@ -201,10 +209,12 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
   }
 
   // FIFO: each product's pool fills its lots in due-date order, up to the lot's contract.
+  // Pinned lots lead and receive inventory before other unpinned lots.
   for (const [key, pool] of pools) {
     const targets = (lotsByProductSeason.get(key) || [])
       .slice()
-      .sort((a, b) => String(a.firstDue || '9').localeCompare(String(b.firstDue || '9')));
+      .sort((a, b) => (Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)))
+        || String(a.firstDue || '9').localeCompare(String(b.firstDue || '9')));
     if (!targets.length) continue;
     // A lot matched by ticket in one file keeps that file's figure; goods without a ticket
     // go to the lots that file did not match. Good follows delivered.
@@ -270,6 +280,7 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
     dueDate: lot.dueDate,
     firstDue: lot.firstDue,
     lastReceiptDate: lot.lastReceiptDate || null,
+    pinned: Boolean(lot.pinned),
     matchedBy: [...lot.matched].join(' + ') || 'chưa có',
     sources: { booking: true, receipt: Boolean(receiptLines.length), delivery: Boolean(deliveryLines.length) },
     rows: lot.rows

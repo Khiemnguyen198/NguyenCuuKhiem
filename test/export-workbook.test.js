@@ -40,3 +40,16 @@ test('fills the progress columns from the FIFO allocation', () => {
   const value = (title) => table[5][header.indexOf(title)];
   assert.deepEqual([value('Model'), value('Màu'), value('Nhận BTP'), value('Đã in (giao)'), value('Còn thiếu'), value('SLHĐ tổng (lô)'), value('Nối bằng')], ['1234567', 'X', 80, 60, 45, 100, 'FIFO']);
 });
+
+test('builds the delivery slip workbook with totals and signatures', async () => {
+  const { buildSlipWorkbook, slipFilename } = await import('../src/export-workbook.js');
+  const items = [
+    { customer: 'DECATHLON', model: '353234', modelCode: '9046670', color: '9046670 BLEU', season: 'SS27', ticket: '73001', contract: 100, bookedQuantity: 100, received: 100, delivered: 80, good: 75, defects: 5, remaining: 25, dueDate: '2026-11-05', status: 'printing', pinned: true }
+  ];
+  const workbook = buildSlipWorkbook({ items, batch: { label: 'Tuần 26/10 – 01/11' } });
+  assert.deepEqual(workbook.SheetNames, ['PHIEU_GIAO_NHAN_BTP']);
+  const table = XLSX.utils.sheet_to_json(workbook.Sheets.PHIEU_GIAO_NHAN_BTP, { header: 1 });
+  assert.equal(table[0][0], 'CÔNG TY TNHH INKAVA');
+  assert.equal(table[1][0], 'PHIẾU GIAO NHẬN VÀ ĐỐI CHIẾU BÁN THÀNH PHẨM (BTP)');
+  assert.equal(slipFilename(new Date(2026, 9, 28)).startsWith('PHIEU_GIAO_NHAN_BTP_20261028'), true);
+});

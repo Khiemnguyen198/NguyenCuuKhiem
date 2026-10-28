@@ -6,16 +6,16 @@ import { batchRow, batchRows, defaultWeekKey, weeksFromDays } from './batches.js
 import { workWeekLabel } from './calendar.js';
 import { DEMO_DASHBOARD } from './demo-data.js';
 import { escapeHtml, formatFileDate, formatNumber } from './format.js';
-import { readJson, writeJson } from './storage.js';
+import { getPinnedLots, readJson, savePinnedLots, writeJson } from './storage.js';
 import { appTemplate } from './template.js';
-import { PAGE_SIZE, colorName, matchesFilters, renderCustomerRows, renderKpis, renderModelRows } from './models-view.js';
+import { PAGE_SIZE, STATUS_COPY, colorName, matchesFilters, renderCustomerRows, renderKpis, renderModelRows } from './models-view.js';
 import { readWarehouseWorkbook } from './warehouse-import.js';
 import { compactReceiptLines, readReceiptsWorkbook } from './receipts-import.js';
 import { restrictToRows, summarizeLots, totalsOf } from './lots.js';
 import { renderLeadtimeRows, renderWarnings } from './progress-view.js';
 import { downloadFromLink, originType, readFromPath, SOURCES, statPath } from './sources.js';
 import { filterOrders, planOrders, planTotals, renderPlanCards, renderPlanTab } from './plan-results.js';
-import { buildExportWorkbook, buildIssuesWorkbook, downloadWorkbook, exportFilename, sortByUrgency } from './export-workbook.js';
+import { buildExportWorkbook, buildIssuesWorkbook, buildSlipWorkbook, downloadWorkbook, exportFilename, slipFilename, sortByUrgency } from './export-workbook.js';
 import { compactRows, diffBookingRows } from './booking-diff.js';
 import { renderChangeList, renderChangeReport, unreviewedCount } from './changes-view.js';
 import { checkIssues, renderCheckReport } from './check-view.js';
@@ -312,7 +312,8 @@ function renderWarehouse() {
   lotSummary = summarizeLots({
     bookingRows: bookingDetail.rows,
     deliveryLines: sourceState.deliveries.lines,
-    receiptLines: sourceState.receipts.lines
+    receiptLines: sourceState.receipts.lines,
+    pinnedLots: getPinnedLots()
   });
   // Built after the FIFO pass so batch copies of the rows carry their allocated figures.
   const booking = activeBooking();
@@ -485,22 +486,151 @@ function renderBatchOptions() {
 // on its own and all three together.
 let planTab = readJson('planner-plan-tab', 'combined');
 let planQuery = '';
+let planCustomer = '';
+let planStatus = '';
 
 function renderPlanResults() {
   if (!warehouseSummary) return;
   const booking = activeBooking();
   const orders = planOrders(warehouseSummary.items);
-  const shown = filterOrders(orders, planQuery);
+  const shown = filterOrders(orders, planQuery, { customer: planCustomer, status: planStatus });
   const totals = planTotals(shown);
   document.querySelector('#planCards').innerHTML = renderPlanCards(totals, planTab);
   document.querySelector('#planTable').innerHTML = renderPlanTab(planTab, shown, totals);
-  document.querySelector('#planResultsCount').textContent = planQuery ? `${formatNumber.format(shown.length)} / ${formatNumber.format(orders.length)} đơn` : `${formatNumber.format(orders.length)} đơn`;
+  const isFiltered = Boolean(planQuery || planCustomer || planStatus);
+  document.querySelector('#planResultsCount').textContent = isFiltered ? `${formatNumber.format(shown.length)} / ${formatNumber.format(orders.length)} đơn` : `${formatNumber.format(orders.length)} đơn`;
   const files = [
     latestBooking.source === 'demo' ? 'booking mẫu' : `booking: ${latestBooking.filename}`,
     sourceState.receipts.filename ? `nhận: ${sourceState.receipts.filename}` : 'chưa có file nhận',
     sourceState.deliveries.filename ? `giao: ${sourceState.deliveries.filename}` : 'chưa có file giao'
   ];
   document.querySelector('#planResultsMeta').textContent = `${booking.batch ? `${booking.batch.label} · ` : ''}${files.join(' · ')}`;
+
+  const custSelect = document.querySelector('#planCustomerFilter');
+  if (custSelect) {
+    const customers = [...new Set(orders.map((o) => o.customer))].sort((a, b) => a.localeCompare(b, 'vi'));
+    custSelect.innerHTML = `<option value="">Tất cả khách hàng</option>${customers.map((name) => `<option value="${escapeHtml(name)}"${name === planCustomer ? ' selected' : ''}>${escapeHtml(name)}</option>`).join('')}`;
+  }
+}
+
+function renderSlipContent(items, batch) {
+  const now = new Date();
+  const pad = (v) => String(v).padStart(2, '0');
+  const ddmm = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '—');
+  const list = items.filter((item) => !item.outsideBooking);
+  const total = list.reduce((acc, item) => {
+    acc.contract += item.contract || 0;
+    acc.weekQty += (item.bookedQuantity || item.contract || 0);
+    acc.received += item.received || 0;
+    acc.delivered += item.delivered || 0;
+    acc.good += item.good || 0;
+    acc.defects += item.defects || 0;
+    acc.remaining += item.remaining || 0;
+    return acc;
+  }, { contract: 0, weekQty: 0, received: 0, delivered: 0, good: 0, defects: 0, remaining: 0 });
+
+  return `
+    <div class="delivery-slip">
+      <div class="slip-header">
+        <div class="slip-brand">
+          <strong>CÔNG TY TNHH INKAVA</strong>
+          <span>Xưởng in &amp; Điều phối sản xuất</span>
+        </div>
+        <div class="slip-title">
+          <h1>PHIẾU GIAO NHẬN BÁN THÀNH PHẨM (BTP)</h1>
+          <p class="slip-subtitle">${batch ? escapeHtml(batch.label) : 'Tất cả các tuần'} · In lúc ${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}</p>
+        </div>
+      </div>
+      <table class="slip-table">
+        <thead>
+          <tr>
+            <th>STT</th>
+            <th class="th-left">Khách hàng</th>
+            <th class="th-left">Mã hàng</th>
+            <th class="th-left">Model</th>
+            <th class="th-left">Màu</th>
+            <th>Số phiếu</th>
+            <th>SLHĐ</th>
+            <th>SL tuần</th>
+            <th>Đã nhận</th>
+            <th>Đã in</th>
+            <th>Giao đạt</th>
+            <th>Lỗi</th>
+            <th>Còn thiếu</th>
+            <th>Hạn giao</th>
+            <th>Trạng thái</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${list.map((item, index) => {
+            const weekQty = item.bookedQuantity || item.contract || 0;
+            return `<tr>
+              <td>${index + 1}</td>
+              <td class="td-left"><strong>${escapeHtml(item.customer)}</strong></td>
+              <td class="td-left">${escapeHtml(item.model || '—')}</td>
+              <td class="td-left">${escapeHtml(item.modelCode || '—')}</td>
+              <td class="td-left">${escapeHtml(colorName(item.color) || '—')}</td>
+              <td>${escapeHtml(item.ticket || '—')}</td>
+              <td>${formatNumber.format(item.contract)}</td>
+              <td><strong>${formatNumber.format(weekQty)}</strong></td>
+              <td>${formatNumber.format(item.received)}</td>
+              <td>${formatNumber.format(item.delivered)}</td>
+              <td>${formatNumber.format(item.good)}</td>
+              <td>${formatNumber.format(item.defects)}</td>
+              <td><strong>${formatNumber.format(item.remaining)}</strong></td>
+              <td>${ddmm(item.dueDate)}</td>
+              <td>${item.pinned ? '<span class="pinned-tag">📌 Ưu tiên</span>' : (STATUS_COPY[item.status]?.label || item.status)}</td>
+            </tr>`;
+          }).join('') || '<tr><td colspan="15" style="text-align:center;padding:20px;">Không có lô nào trong tuần/ngày đã chọn.</td></tr>'}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th colspan="6" class="th-left">TỔNG CỘNG (${formatNumber.format(list.length)} lô)</th>
+            <th>${formatNumber.format(total.contract)}</th>
+            <th>${formatNumber.format(total.weekQty)}</th>
+            <th>${formatNumber.format(total.received)}</th>
+            <th>${formatNumber.format(total.delivered)}</th>
+            <th>${formatNumber.format(total.good)}</th>
+            <th>${formatNumber.format(total.defects)}</th>
+            <th>${formatNumber.format(total.remaining)}</th>
+            <th colspan="2"></th>
+          </tr>
+        </tfoot>
+      </table>
+      <div class="slip-signatures">
+        <div class="slip-sign-box">
+          <strong>ĐIỀU ĐỘ KẾ HOẠCH</strong>
+          <span class="sign-role">(Lập phiếu)</span>
+          <div class="sign-space"></div>
+          <span class="sign-hint">(Ký và ghi rõ họ tên)</span>
+        </div>
+        <div class="slip-sign-box">
+          <strong>THỦ KHO BTP</strong>
+          <span class="sign-role">(Giao hàng)</span>
+          <div class="sign-space"></div>
+          <span class="sign-hint">(Ký và ghi rõ họ tên)</span>
+        </div>
+        <div class="slip-sign-box">
+          <strong>QUẢN ĐỐC XƯỞNG IN</strong>
+          <span class="sign-role">(Nhận hàng)</span>
+          <div class="sign-space"></div>
+          <span class="sign-hint">(Ký và ghi rõ họ tên)</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function openSlipModal() {
+  if (!warehouseSummary) return;
+  const booking = activeBooking();
+  const container = document.querySelector('#slipContent');
+  container.innerHTML = renderSlipContent(warehouseSummary.items, booking.batch);
+  document.querySelector('#slipModal').setAttribute('aria-hidden', 'false');
+}
+
+function closeSlipModal() {
+  document.querySelector('#slipModal').setAttribute('aria-hidden', 'true');
 }
 
 async function loadBookingDetail() {
@@ -1161,6 +1291,47 @@ document.querySelector('#planCards').addEventListener('click', (event) => {
 document.querySelector('#planSearch').addEventListener('input', (event) => {
   planQuery = event.target.value;
   renderPlanResults();
+});
+document.querySelector('#planCustomerFilter')?.addEventListener('change', (event) => {
+  planCustomer = event.target.value;
+  renderPlanResults();
+});
+document.querySelector('#planStatusFilters')?.addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-plan-status]');
+  if (!button) return;
+  planStatus = button.dataset.planStatus;
+  document.querySelectorAll('#planStatusFilters button').forEach((btn) => {
+    btn.setAttribute('aria-pressed', btn === button ? 'true' : 'false');
+  });
+  renderPlanResults();
+});
+document.addEventListener('click', (event) => {
+  const pinBtn = event.target.closest('[data-pin-key]');
+  if (!pinBtn) return;
+  event.stopPropagation();
+  const key = pinBtn.dataset.pinKey;
+  const pinned = getPinnedLots();
+  if (pinned.has(key)) {
+    pinned.delete(key);
+    savePinnedLots(pinned);
+    showToast('Đã bỏ ghim ưu tiên lô hàng.', 'info');
+  } else {
+    pinned.add(key);
+    savePinnedLots(pinned);
+    showToast('Đã ghim ưu tiên nhận BTP!', 'success');
+  }
+  renderWarehouse();
+});
+document.querySelector('#openSlipBtn')?.addEventListener('click', openSlipModal);
+document.querySelector('#openSlipFromModelsBtn')?.addEventListener('click', openSlipModal);
+document.querySelectorAll('[data-close-slip]').forEach((btn) => btn.addEventListener('click', closeSlipModal));
+document.querySelector('#printSlipBtn')?.addEventListener('click', () => window.print());
+document.querySelector('#downloadSlipExcel')?.addEventListener('click', () => {
+  if (!warehouseSummary) return;
+  const booking = activeBooking();
+  const workbook = buildSlipWorkbook({ items: warehouseSummary.items, batch: booking.batch, now: new Date() });
+  downloadWorkbook(workbook, slipFilename(new Date(), booking.batch));
+  showToast('Đã tải xuống phiếu giao nhận BTP.', 'success');
 });
 document.querySelectorAll('[data-batch-select]').forEach((select) => select.addEventListener('change', () => {
   batchKey = select.value;

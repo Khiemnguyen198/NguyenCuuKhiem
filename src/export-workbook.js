@@ -275,6 +275,116 @@ export function buildExportWorkbook({ booking, lots = [], sheetCheck = null }) {
   return workbook;
 }
 
+export function slipFilename(now = new Date(), batch = null) {
+  const ddmm = (iso) => `${iso.slice(8, 10)}${iso.slice(5, 7)}`;
+  const week = !batch ? '' : batch.from === batch.to ? `_NGAY_${ddmm(batch.from)}` : `_TUAN_${ddmm(batch.from)}-${ddmm(batch.to)}`;
+  return `PHIEU_GIAO_NHAN_BTP${week}_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`;
+}
+
+// Delivery / handover slip for the warehouse & printing floor
+export function buildSlipWorkbook({ items = [], batch = null, now = new Date() }) {
+  const ddmm = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '');
+  const list = items.filter((item) => !item.outsideBooking);
+  const title = 'PHIẾU GIAO NHẬN VÀ ĐỐI CHIẾU BÁN THÀNH PHẨM (BTP)';
+  const subtitle = `Tuần: ${batch ? batch.label : 'Tất cả'} · Ngày in: ${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  
+  const headers = [
+    'STT', 'Khách hàng', 'Mã hàng (REF)', 'Mã Model', 'Màu sắc', 'Mùa', 'Số phiếu',
+    'SLHĐ tổng', 'SL tuần', 'Đã nhận BTP', 'Đã giao (in)', 'Giao đạt', 'Lỗi (in+vải)', 'Còn thiếu',
+    'Hạn giao', 'Trạng thái', 'Ghi chú'
+  ];
+
+  const table = [
+    ['CÔNG TY TNHH INKAVA', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    [title, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    [subtitle, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    [],
+    headers
+  ];
+
+  let totalContract = 0;
+  let totalWeek = 0;
+  let totalReceived = 0;
+  let totalDelivered = 0;
+  let totalGood = 0;
+  let totalDefects = 0;
+  let totalRemaining = 0;
+
+  list.forEach((item, index) => {
+    const weekQty = item.bookedQuantity || item.contract || 0;
+    totalContract += item.contract || 0;
+    totalWeek += weekQty;
+    totalReceived += item.received || 0;
+    totalDelivered += item.delivered || 0;
+    totalGood += item.good || 0;
+    totalDefects += item.defects || 0;
+    totalRemaining += item.remaining || 0;
+
+    table.push([
+      index + 1,
+      item.customer || '',
+      item.model || '',
+      item.modelCode || '',
+      colorName(item.color) || '',
+      item.season || '',
+      item.ticket || '',
+      numberCell(item.contract),
+      numberCell(weekQty),
+      numberCell(item.received),
+      numberCell(item.delivered),
+      numberCell(item.good),
+      numberCell(item.defects),
+      numberCell(item.remaining),
+      ddmm(item.dueDate),
+      item.pinned ? '📌 ƯU TIÊN' : (STATUS_COPY[item.status]?.label || item.status),
+      item.pinned ? 'Đã ghim ưu tiên nhận BTP' : ''
+    ]);
+  });
+
+  const totalsIndex = table.length;
+  table.push([
+    'TỔNG CỘNG', '', '', '', '', '', '',
+    numberCell(totalContract),
+    numberCell(totalWeek),
+    numberCell(totalReceived),
+    numberCell(totalDelivered),
+    numberCell(totalGood),
+    numberCell(totalDefects),
+    numberCell(totalRemaining),
+    '', '', ''
+  ]);
+
+  table.push([]);
+  table.push([]);
+  table.push([
+    '', 'ĐẠI DIỆN ĐIỀU ĐỘ / KẾ HOẠCH', '', '', '',
+    'THỦ KHO BTP (GIAO)', '', '', '', '',
+    'QUẢN ĐỐC XƯỞNG IN (NHẬN)', '', '', '', '', ''
+  ]);
+  table.push([
+    '', '(Ký và ghi rõ họ tên)', '', '', '',
+    '(Ký và ghi rõ họ tên)', '', '', '', '',
+    '(Ký và ghi rõ họ tên)', '', '', '', '', ''
+  ]);
+
+  const sheet = XLSX.utils.aoa_to_sheet(table);
+  sheet['!cols'] = [
+    { wch: 6 }, { wch: 16 }, { wch: 14 }, { wch: 12 }, { wch: 25 }, { wch: 8 }, { wch: 10 },
+    { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 12 },
+    { wch: 12 }, { wch: 16 }, { wch: 22 }
+  ];
+  sheet['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 4 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: 11 } },
+    { s: { r: 2, c: 0 }, e: { r: 2, c: 11 } },
+    { s: { r: totalsIndex, c: 0 }, e: { r: totalsIndex, c: 6 } }
+  ];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, 'PHIEU_GIAO_NHAN_BTP');
+  return workbook;
+}
+
 export function downloadWorkbook(workbook, filename) {
   XLSX.writeFile(workbook, filename, { compression: true });
 }

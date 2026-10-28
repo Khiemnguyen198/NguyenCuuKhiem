@@ -11,6 +11,7 @@ export const STATUS_COPY = {
 export const STATUS_FILTERS = [
   ['all', 'Tất cả'],
   ['open', 'Chưa giao đủ'],
+  ['pinned', '📌 Đã ghim'],
   ['overdue', 'Trễ hạn'],
   ['at-risk', 'Tới hạn chưa nhận'],
   ['printing', 'Đang in'],
@@ -44,17 +45,20 @@ export function matchesFilters(item, { customer, status, query, columns = {} }) 
   // Warehouse products without a booking lot only show under their own filter.
   if ((status === 'outside') !== Boolean(item.outsideBooking)) return false;
   if (status === 'outside') return matchesQuery(item, query);
+  if (status === 'pinned' && !item.pinned) return false;
   if (status === 'open' && item.status === 'done') return false;
   if (status === 'overdue' && !item.overdue) return false;
   if (status === 'at-risk' && !item.atRisk) return false;
-  if (!['all', 'open', 'overdue', 'at-risk'].includes(status) && item.status !== status) return false;
+  if (!['all', 'open', 'pinned', 'overdue', 'at-risk'].includes(status) && item.status !== status) return false;
   return matchesQuery(item, query);
 }
 
 function matchesQuery(item, query) {
   if (!query) return true;
-  const haystack = `${item.model} ${item.modelCode || ''} ${item.color} ${item.customer} ${item.ticket || ''} ${(item.rows || []).map((row) => row.po).join(' ')}`.toLocaleLowerCase('vi-VN');
-  return haystack.includes(query.trim().toLocaleLowerCase('vi-VN'));
+  const q = query.trim().toLocaleLowerCase('vi-VN');
+  const pos = (item.rows || []).map((row) => `${row.po || ''} ${row.line || ''}`).join(' ');
+  const haystack = `${item.model} ${item.modelCode || ''} ${item.color} ${item.customer} ${item.ticket || ''} ${pos}`.toLocaleLowerCase('vi-VN');
+  return haystack.includes(q);
 }
 
 // "9046670 1P BEA FUNSTRIPES" → "1P BEA FUNSTRIPES": the model code has its own column.
@@ -147,9 +151,18 @@ export function renderModelRows(items, expandedKey, limit = PAGE_SIZE) {
     const { key } = item;
     const copy = STATUS_COPY[item.status];
     const expanded = key === expandedKey;
-    return `<tr class="model-row${expanded ? ' model-row--expanded' : ''}" data-model-key="${escapeHtml(key)}" tabindex="0" aria-expanded="${expanded}">
-      <td class="delivery-table__customers"><span class="customer-chip">${customerLogo(item.customer)}<span>${escapeHtml(item.customer)}</span></span></td>
-      <th class="model-cell"><strong>${escapeHtml(item.model)}</strong>${item.ticket ? `<small>Phiếu ${escapeHtml(item.ticket)}</small>` : ''}</th>
+    return `<tr class="model-row${expanded ? ' model-row--expanded' : ''}${item.pinned ? ' model-row--pinned' : ''}" data-model-key="${escapeHtml(key)}" tabindex="0" aria-expanded="${expanded}">
+      <td class="delivery-table__customers">
+        <div class="customer-cell-wrap">
+          <button type="button" class="pin-toggle${item.pinned ? ' pin-toggle--pinned' : ''}" data-pin-key="${escapeHtml(key)}" title="${item.pinned ? 'Bỏ ghim ưu tiên nhận BTP' : 'Ghim nhận BTP ưu tiên'}" aria-label="${item.pinned ? 'Bỏ ghim ưu tiên' : 'Ghim ưu tiên'}"><i class="ph ph-push-pin${item.pinned ? '-fill' : ''}"></i></button>
+          <span class="customer-chip">${customerLogo(item.customer)}<span>${escapeHtml(item.customer)}</span></span>
+        </div>
+      </td>
+      <th class="model-cell">
+        <div class="model-cell-inner">
+          <strong>${escapeHtml(item.model)}</strong>${item.pinned ? '<span class="pinned-tag" title="Lô được ưu tiên nhận BTP">Ưu tiên</span>' : ''}${item.ticket ? `<small>Phiếu ${escapeHtml(item.ticket)}</small>` : ''}
+        </div>
+      </th>
       <td class="th-left">${escapeHtml(item.modelCode || '—')}</td>
       <td class="color-cell" title="${escapeHtml(item.color)}">${escapeHtml(colorName(item.color) || '—')}</td>
       <td>${escapeHtml(item.season || '—')}</td>
