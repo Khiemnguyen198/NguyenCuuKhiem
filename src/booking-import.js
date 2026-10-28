@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { productKey } from './keys.js';
+import { canonicalHeader, isBookingHeader, repairBookingRows } from './booking-columns.js';
 
 const LEAD_TIME_SHEETS = [
   ['LEADTIME 1 NGÀY', '1 ngày'],
@@ -33,15 +34,16 @@ export function toIsoDate(value) {
 
 export const label = (cell) => String(cell ?? '').replace(/\s+/g, ' ').trim().toUpperCase();
 
-// The header row moves between sheets (row 4 in some, row 6 in others) and TH repeats
-// it above the data, so use the last header-like row near the top.
+// The header row moves between sheets (row 4 in some, row 6 in others, lower when rows are
+// inserted above) and TH repeats it above the data, so use the last header-like row near the
+// top. Headers are recognised however they are spelled (see booking-columns.js).
 export function findHeaderRow(table, fallback) {
-  const index = table.slice(0, 15).findLastIndex((cells) => {
-    const labels = cells.map(label);
-    return labels.includes('LINE') && labels.includes('PO');
-  });
+  const index = table.slice(0, 30).findLastIndex((cells) => isBookingHeader(cells));
   return index === -1 ? fallback : index;
 }
+
+// Header cells under the names the readers use (REF, MODEL CODE, LINE QTY…).
+export const bookingHeaders = (cells = []) => cells.map(canonicalHeader);
 
 const DAY_LABELS = { pickup: 'PXC CHUYỂN', return: 'PXI TRẢ', week: 'TỔNG TUẦN', day: 'TỔNG NGÀY' };
 
@@ -90,20 +92,25 @@ export function readDayColumns(table) {
   return days;
 }
 
-function readRowsFromSheet(sheet, fallbackRange, leadTimeOverride = null) {
+function readRowsFromSheet(sheet, fallbackRange, leadTimeOverride = null, sheetName = '') {
   // Array mode keeps every row aligned with the daily plan columns.
   const table = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true, blankrows: true });
   const headerIndex = findHeaderRow(table, fallbackRange);
-  const headers = (table[headerIndex] || []).map((cell) => String(cell ?? '').replace(/\s+/g, ' ').trim());
+  const headers = bookingHeaders(table[headerIndex]);
   const days = readDayColumns(table);
+  const dayColumns = new Set(days.map((day) => day.column));
   const rows = [];
-  for (const cells of table.slice(headerIndex + 1)) {
+  for (const [offset, cells] of table.slice(headerIndex + 1).entries()) {
     const row = {};
     headers.forEach((header, column) => {
       if (header && !(header in row)) row[header] = cells[column];
     });
-    if (row.LINE == null || row.LINE === '' || label(row.LINE) === 'LINE') continue;
-    if (![row.PO, row.REF, row['MODEL CODE'], row['LINE QTY']].some((value) => value != null && value !== '')) continue;
+    const filled = (value) => value != null && value !== '';
+    if (label(row.LINE) === 'LINE' || label(row.PO) === 'PO') continue;
+    // A booking line has a REF or a model next to a PO or a quantity. A missing LINE alone
+    // no longer drops the row (it used to vanish from the booking without a word).
+    if (!filled(row.LINE) && !(filled(row.REF) || filled(row['MODEL CODE']))) continue;
+    if (![row.PO, row.REF, row['MODEL CODE'], row['LINE QTY']].some(filled)) continue;
     // Keyed by day position, not date: the sheet sometimes repeats a date in two columns.
     const allocations = {};
     days.forEach((day, index) => {
@@ -127,7 +134,12 @@ function readRowsFromSheet(sheet, fallbackRange, leadTimeOverride = null) {
       planner: String(row['KẾ HOẠCH'] ?? ''),
       printCount: Number(row['HÌNH IN'] || 0),
       leadTime: String(row.Leadtime ?? leadTimeOverride ?? ''),
-      allocations
+      allocations,
+      // Where the row sits, for repair notes; the plain cells let a repair find a value that
+      // slid into the wrong column. Both are dropped before the rows are stored.
+      sheetName,
+      sheetRow: headerIndex + 2 + offset,
+      cells: cells.filter((_, column) => !dayColumns.has(column))
     });
   }
   return { rows, days: days.map(({ date, returnDate, fileTotal }) => ({ date, returnDate, fileTotal })) };
@@ -181,11 +193,22 @@ export function checkDailyTotals({ rows, days }) {
 }
 
 // Booking rows plus the planned days (PXC pick-up / PXI return dates) they are allocated to.
+// Rows are repaired by Mã hàng + Model (booking-columns.js); `repairs` lists every change.
 export function readBooking(workbook) {
-  if (workbook.Sheets.TH) return readRowsFromSheet(workbook.Sheets.TH, 4);
+  const { rows, days } = readBookingSheets(workbook);
+  const repairs = repairBookingRows(rows);
+  for (const row of rows) {
+    delete row.sheetName;
+    delete row.sheetRow;
+  }
+  return { rows, days, repairs };
+}
+
+function readBookingSheets(workbook) {
+  if (workbook.Sheets.TH) return readRowsFromSheet(workbook.Sheets.TH, 4, null, 'TH');
   const parts = LEAD_TIME_SHEETS
     .filter(([sheetName]) => workbook.Sheets[sheetName])
-    .map(([sheetName, leadTime]) => readRowsFromSheet(workbook.Sheets[sheetName], 3, leadTime));
+    .map(([sheetName, leadTime]) => readRowsFromSheet(workbook.Sheets[sheetName], 3, leadTime, sheetName));
   // Each lead-time sheet has its own return dates, so the combined view keeps one column per
   // pick-up date and re-keys every row's allocations to it.
   const dates = [...new Set(parts.flatMap((part) => part.days.map((day) => day.date)))].sort();

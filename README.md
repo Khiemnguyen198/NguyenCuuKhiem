@@ -69,6 +69,14 @@ Danh sách các file booking đã nhập nằm bên dưới.
 
 Nhập bằng link: khi chạy `npm run dev`, máy chủ tải file từ link (SharePoint/OneDrive tự thêm `download=1` và giữ cookie khách của link “Bất kỳ ai có link”; Google Sheets tự xuất `.xlsx`). File nhận/giao nạp từ link được **cập nhật lại từ link** khi bấm nút, khi mở trang và mỗi 30 phút khi trang đang mở, vì bên giao nhận sửa file SharePoint liên tục. Link chỉ dành cho người trong tổ chức thì không tải được. Bản Sites chỉ đọc được link cho phép tải chéo (CORS), nên không tự cập nhật từ SharePoint.
 
+## File booking sai cột, sai hàng
+
+App bám theo **Mã hàng (REF) + Model (mã 7 số)** để đọc file booking cho chắc:
+- **Tên cột linh hoạt**: không phân biệt dấu, hoa/thường, khoảng trắng; nhận cả tên gọi khác (“Mã hàng” = REF, “Model” = MODEL CODE, “Màu” = COLOR, “Line qty”, “Số phiếu”, “Lead time”…). Hàng tiêu đề được dò trong 30 dòng đầu, nên chèn thêm dòng phía trên vẫn đọc được.
+- **Tự sửa khi chắc chắn** (dựa vào chính file booking): REF và MODEL CODE gõ đổi chỗ; MODEL CODE trống thì lấy mã 7 số trong ô COLOR, hoặc mã model có ở một ô khác của dòng (dữ liệu lệch cột), hoặc model duy nhất của mã hàng đó; REF trống thì lấy mã hàng mà model đó có ở các dòng khác.
+- **Không tự đoán khi mơ hồ**: mã hàng có nhiều model mà dòng không có mã 7 số; MODEL CODE khác mã đầu ô COLOR; một dòng ghi mã hàng khác với mã hàng của model đó ở các dòng khác; dòng thiếu LINE (vẫn được tính, không còn bị bỏ qua).
+- Mọi chỗ đã sửa / cần xem được liệt kê trong **Kiểm tra file → Đọc theo Mã hàng + Model** với sheet, số dòng, giá trị trong file, giá trị app dùng và lý do. File nhận / giao sẽ áp dụng cách này sau.
+
 ## Theo mã hàng
 
 Mỗi dòng là một lô: Khách hàng, Mã hàng (kèm số phiếu), Model, Màu, Mùa, SLHĐ tổng, đã nhận BTP, đã in (giao), giao đạt, lỗi (hỏng in + lỗi vải), còn thiếu, hạn giao, trạng thái (Đã giao đủ, Đang in, Thiếu BTP, Chưa nhận BTP, Trễ hạn, Sắp tới hạn). Bấm vào lô để xem từng dòng PO với số đã phân bổ và cách nối (phiếu / FIFO).

@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { findHeaderRow, label, readDayColumns, toIsoDate } from './booking-import.js';
+import { bookingHeaders, findHeaderRow, label, readDayColumns, toIsoDate } from './booking-import.js';
 
 // Cell-level check of the data planners type into the booking's TH sheet (dates, PO, quantities,
 // day plan). Totals the sheet computes itself (SLHĐ TỔNG, TỔNG NGÀY…) are not compared: the
@@ -38,7 +38,7 @@ export function checkBookingSheet(workbook, sheetName = 'TH') {
   if (!sheet) return { sheet: sheetName, checked: false, issues: [] };
   const table = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true, blankrows: true });
   const headerIndex = findHeaderRow(table, 4);
-  const headers = (table[headerIndex] || []).map(label);
+  const headers = bookingHeaders(table[headerIndex]).map(label);
   const at = (name) => headers.indexOf(name);
   const columns = {
     line: at('LINE'), customer: at('CUS'), ref: at('REF'), color: at('COLOR'), po: at('PO'), quantity: at('LINE QTY'),

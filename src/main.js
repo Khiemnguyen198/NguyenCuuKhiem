@@ -956,10 +956,10 @@ document.querySelector('#overviewView').addEventListener('click', async (event) 
 // Reads a booking workbook (from a file or a link) and stores it; returns the new import id.
 async function importBooking(buffer, filename, origin = null, { quiet = false } = {}) {
   const workbook = readWorkbook(buffer);
-  const { rows, days } = readBooking(workbook);
+  const { rows, days, repairs } = readBooking(workbook);
   if (!rows.length) throw new Error('Không tìm thấy dữ liệu booking hợp lệ (sheet TH hoặc LEADTIME).');
   // Cell-level problems of TH are kept with the import and listed in "Kiểm tra file".
-  const sheetCheck = { ...crossCheckSheets(workbook), cells: checkBookingSheet(workbook) };
+  const sheetCheck = { ...crossCheckSheets(workbook), cells: checkBookingSheet(workbook), repairs };
   const summary = summarizeBooking(rows);
   let importId;
   let hasChanges;
