@@ -95,7 +95,7 @@ export function renderSourceCards({ allowPath = true, canBrowse = false } = {}) 
       </form>` : ''}
       <footer class="source-card__footer">
         <button type="button" class="source-update" data-update-source="${kind}" title="Đọc lại file từ nguồn đã chọn"><i class="ph ph-arrows-clockwise"></i>Cập nhật file</button>
-        ${kind === 'booking' ? '<button type="button" class="source-check" data-check><i class="ph ph-list-checks"></i>Kiểm tra</button>' : ''}
+        ${kind === 'booking' ? '<button type="button" class="source-check" data-show-calendar><i class="ph ph-calendar-dots"></i>Kiểm tra</button>' : ''}
         <button type="button" class="source-delete" data-delete-source="${kind}" title="Xoá file của mục ${source.title}"><i class="ph ph-trash"></i>Xoá</button>
       </footer>
     </article>`).join('');
