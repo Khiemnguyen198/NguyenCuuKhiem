@@ -72,10 +72,10 @@ export function renderCalendar({ columns, orders, shownOrders, selectedDate = nu
   const template = `200px ${busy.map((used) => (used ? 'minmax(84px, 1fr)' : '46px')).join(' ')}`;
   const dayClass = (column, prefix) => `${column.sunday ? ` ${prefix}--sunday` : ''}${column.date === today ? ` ${prefix}--today` : ''}${column.date === selectedDate ? ` ${prefix}--selected` : ''}`;
   const head = columns.map((column, position) => busy[position]
-    ? `<div class="cal-day${dayClass(column, 'cal-day')}" title="${number(counts[position])} đơn · ${number(totals[position])} sản phẩm">
+    ? `<${column.index == null ? 'div' : `button type="button" data-cal-day="${column.index}" aria-pressed="${column.date === selectedDate}"`} class="cal-day${dayClass(column, 'cal-day')}" title="${column.index == null ? '' : column.date === selectedDate ? 'Bấm để xem cả tuần' : 'Bấm để lọc theo ngày này'}">
         <strong>${SHORT_WEEKDAYS[column.weekday]} ${shortDate(column.date)}</strong>
         <small>${counts[position] ? `${number(counts[position])} đơn · ${number(totals[position])}` : 'chỉ hạn giao'}</small>
-      </div>`
+      </${column.index == null ? 'div' : 'button'}>`
     : `<div class="cal-day cal-day--empty${dayClass(column, 'cal-day')}" title="${column.weekday} ${shortDate(column.date)}: không có đơn"><strong>${SHORT_WEEKDAYS[column.weekday]}</strong><small>${shortDate(column.date)}</small></div>`).join('');
   // Day columns behind each line, so Sunday, today and the picked day read down the calendar.
   const backdrop = columns.map((column, position) => `<span class="cal-cell${dayClass(column, 'cal-cell')}" style="grid-column:${position + 2}"></span>`).join('');

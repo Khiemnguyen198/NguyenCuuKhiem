@@ -733,3 +733,24 @@ button.warning-chip { cursor: pointer; }
   .order-detail__stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .calendar-legend { margin-left: 0; }
 }
+
+button.cal-day { border: 0; border-left: 1px solid #e6edf2; background: transparent; text-align: left; font: inherit; cursor: pointer; }
+button.cal-day:hover { background: #eef5f9; }
+button.cal-day[aria-pressed="true"] { background: #dff3ea; box-shadow: inset 0 -2px 0 var(--green); }
+.calendar-actions select[data-day-select] { min-width: 120px; }
+
+/* Export bubble, bottom-right on every page */
+.export-fab { position: fixed; right: 24px; bottom: 24px; z-index: 50; padding: 12px 18px 12px 14px; border: 0; border-radius: 999px; display: flex; align-items: center; gap: 10px; color: #fff; background: var(--green); box-shadow: 0 10px 24px -8px rgb(8 120 91 / 60%), 0 2px 6px rgb(16 40 68 / 18%); font: inherit; text-align: left; cursor: pointer; }
+.export-fab[hidden] { display: none; }
+.export-fab:hover { background: #0b8f69; }
+.export-fab:focus-visible { outline: 3px solid rgb(17 167 122 / 40%); outline-offset: 3px; }
+.export-fab:disabled { opacity: .75; cursor: wait; }
+.export-fab i { font-size: 24px; }
+.export-fab span { display: grid; line-height: 1.2; }
+.export-fab strong { font-size: 13px; }
+.export-fab small { color: #d7f4ea; font-size: 10px; white-space: nowrap; }
+.main { padding-bottom: 96px; }
+@media (max-width: 760px) {
+  .export-fab { right: 14px; bottom: 14px; padding: 12px; }
+  .export-fab span { display: none; }
+}

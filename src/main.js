@@ -320,6 +320,16 @@ function renderWarehouse() {
   renderPlanProgress();
   renderPlanResults();
   renderCalendarView();
+  renderExportFab();
+}
+
+// Bottom-right bubble: export the selected week (or day) from any page.
+function renderExportFab() {
+  const fab = document.querySelector('#exportFab');
+  fab.hidden = latestBooking.source === 'demo' || !bookingDetail.rows.length;
+  const booking = activeBooking();
+  document.querySelector('#exportFabScope').textContent = booking.batch ? booking.batch.label.replace(/ \(.*\)$/, '') : 'Cả file booking';
+  fab.title = `Xuất TH + CAN DOI cho ${booking.batch?.label || 'cả file booking'}`;
 }
 
 // Tổng quan → Kiểm tra (booking card): the selected week as a calendar, one region per order.
@@ -347,11 +357,13 @@ function renderCalendarView() {
   calendarItems = new Map(weekItems.map((item) => [item.key, item]));
   const columns = weekColumns(week, bookingDetail.days);
   const orders = calendarOrders(weekItems, columns);
-  const shownOrders = filterCalendar(orders, calendarFilter);
   const selectedDate = dayKey === '' ? null : bookingDetail.days[Number(dayKey)]?.date;
+  // A picked day (here or in the results above/below) shows only the orders planned that day.
+  const dayColumn = columns.findIndex((column) => column.date === selectedDate);
+  const shownOrders = filterCalendar(orders, calendarFilter).filter((order) => dayColumn === -1 || order.cells[dayColumn] > 0);
   grid.innerHTML = renderCalendar({ columns, orders, shownOrders, selectedDate, today: todayIso() });
   const total = orders.reduce((sum, order) => sum + order.quantity, 0);
-  document.querySelector('#calendarTitle').textContent = week.label;
+  document.querySelector('#calendarTitle').textContent = selectedDate ? `${week.label} · ${dayName(selectedDate)}` : week.label;
   document.querySelector('#calendarMeta').textContent = `${shownOrders.length === orders.length ? '' : `${formatNumber.format(shownOrders.length)} / `}${formatNumber.format(orders.length)} đơn · ${formatNumber.format(Math.round(total))} sản phẩm trong tuần`;
   document.querySelectorAll('[data-calendar-filter]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.calendarFilter === calendarFilter.status)));
   const weeks = bookingWeeks();
@@ -1081,14 +1093,7 @@ sourcesPanel.addEventListener('submit', async (event) => {
     renderSources();
   });
 });
-document.querySelectorAll('[data-day-select]').forEach((select) => select.addEventListener('change', () => {
-  dayKey = select.value;
-  writeJson('planner-day', dayKey);
-  expandedModelKey = null;
-  modelLimit = PAGE_SIZE;
-  renderWarehouse();
-  renderCheck();
-}));
+document.querySelectorAll('[data-day-select]').forEach((select) => select.addEventListener('change', () => selectDay(select.value)));
 document.querySelector('#closeCalendar').addEventListener('click', () => {
   calendarOpen = false;
   writeJson('planner-calendar-open', false);
@@ -1115,7 +1120,18 @@ document.querySelector('#calendarSearch').addEventListener('input', (event) => {
   calendarFilter.query = event.target.value;
   renderCalendarView();
 });
+function selectDay(value) {
+  dayKey = value;
+  writeJson('planner-day', dayKey);
+  expandedModelKey = null;
+  modelLimit = PAGE_SIZE;
+  renderWarehouse();
+  renderCheck();
+}
+
 document.querySelector('#calendarGrid').addEventListener('click', (event) => {
+  const day = event.target.closest('[data-cal-day]');
+  if (day) selectDay(day.dataset.calDay === dayKey ? '' : day.dataset.calDay);
   const order = event.target.closest('[data-order]');
   if (order) openOrder(order.dataset.order);
 });
@@ -1156,6 +1172,24 @@ checkReport.addEventListener('click', (event) => {
   if (!event.target.closest('[data-download-issues]')) return;
   const name = (latestBooking.filename || 'booking').replace(/\.[^.]+$/, '');
   downloadWorkbook(buildIssuesWorkbook(bookingDetail.sheetCheck, latestBooking.filename), `LOI_FILE_BOOKING_${name}.xlsx`);
+});
+document.querySelector('#exportFab').addEventListener('click', async () => {
+  const fab = document.querySelector('#exportFab');
+  const issues = checkIssues({ booking: activeBooking(), summary: warehouseSummary });
+  // Something blocks the export: show the check so the planner sees why.
+  if (issues.length) {
+    openCheck();
+    showToast(issues.join(' '), 'error');
+    return;
+  }
+  fab.disabled = true;
+  try {
+    await exportSummary();
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    fab.disabled = false;
+  }
 });
 document.querySelectorAll('[data-close-check]').forEach((button) => button.addEventListener('click', closeCheck));
 document.querySelectorAll('[data-export]').forEach((button) => button.addEventListener('click', async () => {
