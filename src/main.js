@@ -630,13 +630,13 @@ async function loadOrigins() {
   }
 }
 
-async function saveOrigin(kind, origin, mtime = null) {
-  originState[kind] = origin ? { origin, mtime } : null;
+async function saveOrigin(kind, origin, { mtime = null, hash = null } = {}) {
+  originState[kind] = origin ? { origin, mtime, hash, checkedAt: new Date().toISOString() } : null;
   if (isStaticPages) {
     writeJson('planner-origins', originState);
     return;
   }
-  const response = await fetch('/api/origins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, origin, mtime }) });
+  const response = await fetch('/api/origins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, ...(originState[kind] || { origin: null }) }) });
   if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Không lưu được nguồn dữ liệu.');
 }
 
@@ -646,14 +646,34 @@ async function readOrigin(origin) {
   return { buffer, filename, mtime: new Date().toISOString() };
 }
 
-// Reads the file from its link or path, imports it and remembers the origin for refreshes.
+// Fingerprint of a downloaded file, so a refresh that brings the same file changes nothing.
+async function contentHash(buffer) {
+  if (!globalThis.crypto?.subtle) return null;
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', buffer));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+// Reads the file from its link or path, imports it when its content changed and remembers the
+// origin for refreshes. The origin is only saved once the file was read and imported.
 async function useOrigin(kind, origin, { quiet = false } = {}) {
-  if (refreshing.has(kind)) return;
+  if (refreshing.has(kind)) {
+    if (quiet) return;
+    throw new Error(`Mục ${SOURCES[kind].title} đang được cập nhật, chờ một chút rồi thử lại.`);
+  }
   refreshing.add(kind);
   try {
     const { buffer, filename, mtime } = await readOrigin(origin);
-    await saveOrigin(kind, origin, mtime);
+    const hash = await contentHash(buffer);
+    const previous = originState[kind];
+    if (hash && previous?.origin === origin && previous.hash === hash) {
+      await saveOrigin(kind, origin, { mtime, hash });
+      if (!quiet) showToast(`${SOURCES[kind].title}: file chưa thay đổi so với lần đọc trước.`, 'info');
+      renderSources();
+      return;
+    }
     await importSource(kind, buffer, filename, origin, { quiet });
+    await saveOrigin(kind, origin, { mtime, hash });
+    renderSources();
   } finally {
     refreshing.delete(kind);
   }
@@ -668,7 +688,7 @@ async function pollOrigins() {
       if (originType(origin) === 'path') {
         const info = await statPath(origin);
         if (info.mtime !== mtime) await useOrigin(kind, origin, { quiet: true });
-      } else if (!(Date.now() - Date.parse(mtime || 0) < AUTO_REFRESH_MINUTES * 60_000)) {
+      } else if (!(Date.now() - Date.parse(originState[kind].checkedAt || mtime || 0) < AUTO_REFRESH_MINUTES * 60_000)) {
         await useOrigin(kind, origin, { quiet: true });
       }
     } catch (error) {
@@ -999,7 +1019,12 @@ document.querySelector('#importButton').addEventListener('click', () => document
 document.querySelector('#fileInput').addEventListener('change', async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
-  const importId = await withBusyButton(document.querySelector('#importButton'), 'Đang xử lý', async () => importBooking(await file.arrayBuffer(), file.name));
+  const importId = await withBusyButton(document.querySelector('#importButton'), 'Đang xử lý', async () => {
+    const id = await importBooking(await file.arrayBuffer(), file.name);
+    // The booking is now this file; stop refreshing it from an older link or path.
+    if (originState.booking) await saveOrigin('booking', null);
+    return id;
+  });
   event.target.value = '';
   if (importId) openPlanDetail(importId);
 });

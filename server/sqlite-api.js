@@ -109,22 +109,36 @@ function openDatabase(dataDirectory = resolve('.data')) {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
+  const originColumns = database.prepare('PRAGMA table_info(source_origins)').all().map((column) => column.name);
+  if (!originColumns.includes('content_hash')) database.exec('ALTER TABLE source_origins ADD COLUMN content_hash TEXT');
+  if (!originColumns.includes('checked_at')) database.exec('ALTER TABLE source_origins ADD COLUMN checked_at TEXT');
+  for (const kind of SOURCE_KINDS) pruneSnapshots(kind);
 }
 
 const SOURCE_KINDS = new Set(['receipts', 'deliveries']);
+// Only the newest snapshot is read; a few older ones are kept, not one per refresh forever.
+const KEPT_SNAPSHOTS = 3;
+
+function pruneSnapshots(kind) {
+  database.prepare(`
+    DELETE FROM source_snapshots WHERE kind = ? AND id NOT IN (
+      SELECT id FROM source_snapshots WHERE kind = ? ORDER BY id DESC LIMIT ?
+    )
+  `).run(kind, kind, KEPT_SNAPSHOTS);
+}
 const ORIGIN_KINDS = new Set(['booking', ...SOURCE_KINDS]);
 
 // Where each input is refreshed from: a share link or a file path, plus the file's modified
 // time when it was last read, so a changed file is read again.
 function listOrigins() {
   const origins = Object.fromEntries([...ORIGIN_KINDS].map((kind) => [kind, null]));
-  for (const row of database.prepare('SELECT kind, origin, origin_mtime AS mtime FROM source_origins').all()) {
-    origins[row.kind] = { origin: row.origin, mtime: row.mtime };
+  for (const row of database.prepare('SELECT kind, origin, origin_mtime AS mtime, content_hash AS hash, checked_at AS checkedAt FROM source_origins').all()) {
+    origins[row.kind] = { origin: row.origin, mtime: row.mtime, hash: row.hash, checkedAt: row.checkedAt };
   }
   // Links saved before this table existed sit on the newest snapshot.
   for (const kind of SOURCE_KINDS) {
     const origin = !origins[kind] && database.prepare('SELECT origin FROM source_snapshots WHERE kind = ? ORDER BY id DESC LIMIT 1').get(kind)?.origin;
-    if (origin) origins[kind] = { origin, mtime: null };
+    if (origin) origins[kind] = { origin, mtime: null, hash: null, checkedAt: null };
   }
   return origins;
 }
@@ -417,6 +431,7 @@ export function registerApi(use, { dataDirectory } = {}) {
       }
       database.prepare('INSERT INTO source_snapshots(kind, filename, origin, lines_json) VALUES (?, ?, ?, ?)')
         .run(kind, payload.filename, payload.origin || null, JSON.stringify(payload.lines));
+      pruneSnapshots(kind);
       return sendJson(response, 201, latestSource(kind));
     } catch (error) {
       return sendJson(response, 500, { error: error.message || 'Không thể lưu nguồn dữ liệu.' });
@@ -427,13 +442,14 @@ export function registerApi(use, { dataDirectory } = {}) {
     if (request.method === 'GET') return sendJson(response, 200, listOrigins());
     if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
     try {
-      const { kind, origin, mtime } = JSON.parse(await readBody(request));
+      const { kind, origin, mtime, hash, checkedAt } = JSON.parse(await readBody(request));
       if (!ORIGIN_KINDS.has(kind)) return sendJson(response, 400, { error: 'Loại nguồn dữ liệu không hợp lệ.' });
       if (origin) {
         database.prepare(`
-          INSERT INTO source_origins(kind, origin, origin_mtime) VALUES (?, ?, ?)
-          ON CONFLICT(kind) DO UPDATE SET origin = excluded.origin, origin_mtime = excluded.origin_mtime, updated_at = CURRENT_TIMESTAMP
-        `).run(kind, String(origin), mtime || null);
+          INSERT INTO source_origins(kind, origin, origin_mtime, content_hash, checked_at) VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(kind) DO UPDATE SET origin = excluded.origin, origin_mtime = excluded.origin_mtime,
+            content_hash = excluded.content_hash, checked_at = excluded.checked_at, updated_at = CURRENT_TIMESTAMP
+        `).run(kind, String(origin), mtime || null, hash || null, checkedAt || null);
       } else {
         database.prepare('DELETE FROM source_origins WHERE kind = ?').run(kind);
       }
