@@ -134,7 +134,7 @@ function renderPlanList(files = fileHistoryState) {
   document.querySelector('#planCount').textContent = formatNumber.format(plans.length);
   document.querySelector('#planFiles').innerHTML = plans.length
     ? plans.map(planRow).join('')
-    : '<div class="plan-list-empty"><i class="ph ph-calendar-x"></i><strong>Chưa có file kế hoạch</strong><span>Nhấn “Nhập file booking” để tạo kế hoạch đầu tiên.</span></div>';
+    : '<div class="plan-list-empty"><i class="ph ph-calendar-x"></i><strong>Chưa có file kế hoạch</strong><span>Nhập file booking ở Tổng quan → Nguồn dữ liệu.</span></div>';
 }
 
 function renderFileHistory(files = fileHistoryState) {
@@ -184,7 +184,6 @@ function showPage(pageName) {
   document.querySelector('#planListView').hidden = !isPlanList;
   document.querySelector('#planningView').hidden = true;
   document.querySelector('#backToPlans').hidden = true;
-  document.querySelector('#importButton').hidden = !isPlanList;
   const [eyebrow, title] = PAGE_COPY[pageName];
   document.querySelector('#pageEyebrow').textContent = eyebrow;
   document.querySelector('#pageTitle').textContent = title;
@@ -198,7 +197,6 @@ function openPlanView() {
   document.querySelector('#planListView').hidden = true;
   document.querySelector('#planningView').hidden = false;
   document.querySelector('#backToPlans').hidden = false;
-  document.querySelector('#importButton').hidden = false;
   document.querySelector('#pageEyebrow').textContent = 'KẾ HOẠCH SẢN XUẤT';
   document.querySelector('#pageTitle').textContent = 'Điều phối kế hoạch';
 }
@@ -1013,21 +1011,6 @@ async function withBusyButton(button, busyLabel, task) {
     button.innerHTML = label;
   }
 }
-
-// The Kế hoạch page keeps its own import button and opens the new plan right away.
-document.querySelector('#importButton').addEventListener('click', () => document.querySelector('#fileInput').click());
-document.querySelector('#fileInput').addEventListener('change', async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  const importId = await withBusyButton(document.querySelector('#importButton'), 'Đang xử lý', async () => {
-    const id = await importBooking(await file.arrayBuffer(), file.name);
-    // The booking is now this file; stop refreshing it from an older link or path.
-    if (originState.booking) await saveOrigin('booking', null);
-    return id;
-  });
-  event.target.value = '';
-  if (importId) openPlanDetail(importId);
-});
 
 const sourcesPanel = document.querySelector('.sources-panel');
 const sourceForms = (kind) => [...sourcesPanel.querySelectorAll(`[data-link-form="${kind}"], [data-path-form="${kind}"]`)];

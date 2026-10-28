@@ -26,9 +26,7 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, ca
             <p class="eyebrow" id="pageEyebrow">KHẢ NĂNG GIAO HÀNG</p>
             <h1 id="pageTitle">Tổng quan</h1>
           </div>
-          <button class="primary-button" id="importButton" hidden><i class="ph ph-upload-simple"></i>Nhập file booking</button>
           <button class="back-button" id="backToPlans" hidden><i class="ph ph-arrow-left"></i>Danh sách kế hoạch</button>
-          <input id="fileInput" type="file" accept=".xlsx,.xls,.xlsm,.xlsb" hidden />
         </div>
         <div class="topbar__actions">
           <button class="changes-button" id="changesButton" type="button"><i class="ph ph-bell-ringing"></i><span>Thay đổi booking</span><b id="changesBadge" hidden>0</b></button>

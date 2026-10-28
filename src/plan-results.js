@@ -124,7 +124,7 @@ const TABLES = {
 };
 
 const COMBINED_HEAD = `${IDENTITY_HEAD}<th>SL booking</th><th>Đã nhận BTP</th><th>Đã giao BTP</th><th>Tồn BTP</th><th>Hạn giao</th><th class="th-left">Cần chú ý</th>`;
-const COMBINED_COLS = '<colgroup><col style="width:15%"><col style="width:9%"><col style="width:8%"><col style="width:13%"><col style="width:6%"><col style="width:8%"><col style="width:8%"><col style="width:8%"><col style="width:7%"><col style="width:7%"><col style="width:11%"></colgroup>';
+const COMBINED_COLS = '<colgroup><col style="width:11%"><col style="width:9%"><col style="width:8%"><col style="width:17%"><col style="width:6%"><col style="width:8%"><col style="width:8%"><col style="width:8%"><col style="width:7%"><col style="width:7%"><col style="width:11%"></colgroup>';
 const combinedRow = (order) => `<tr>${identity(order)}<td>${number(order.contract)}</td><td>${number(order.received)}</td><td>${number(order.delivered)}</td><td class="${order.onHand ? 'num--info' : ''}"><strong>${number(order.onHand)}</strong></td>${dueCell(order)}<td class="delivery-table__left"><span class="pill-stack">${pills(attentionOf(order))}</span></td></tr>`;
 
 function renderCombined(orders, totals) {
