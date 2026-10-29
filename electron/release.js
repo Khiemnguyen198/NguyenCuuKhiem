@@ -1,6 +1,6 @@
 // Finding a newer version on GitHub Releases. Kept free of Electron so it can be tested
 // with plain Node.
-export const RELEASES_URL = 'https://api.github.com/repos/Khiemnguyen198/NguyenCuuKhiem/releases/latest';
+export const RELEASES_URL = 'https://api.github.com/repos/DevonReyesDavidJR/Inkava-Planner/releases/latest';
 
 const parts = (version) => String(version).trim().replace(/^v/i, '').split(/[.-]/).slice(0, 3).map((part) => Number.parseInt(part, 10) || 0);
 

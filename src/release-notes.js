@@ -2,6 +2,10 @@ import { escapeHtml } from './format.js';
 
 // Bundle notes with their version so they remain accurate and available offline.
 const RELEASE_NOTES = {
+  '0.0.22': [
+    'Sửa ngày nhận BTP cũ bị ghép nhầm vào hợp đồng mới.',
+    'Cập nhật đường dẫn kho Inkava-Planner và chức năng kiểm tra phiên bản.'
+  ],
   '0.0.21': [
     'Không ghép nhầm ngày nhận của PO cũ vào hợp đồng mới chỉ theo mã hàng và mùa.',
     'Chỉ ghi ngày nhận và ngày giao dự kiến khi có đủ căn cứ đối chiếu.'

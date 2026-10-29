@@ -12,7 +12,7 @@ Phần mềm đối chiếu booking với tình hình nhận, in và giao bán t
 
 ## Bắt đầu sử dụng
 
-1. Tải ứng dụng cho Mac hoặc Windows tại [GitHub Releases](https://github.com/Khiemnguyen198/NguyenCuuKhiem/releases/latest).
+1. Tải ứng dụng cho Mac hoặc Windows tại [GitHub Releases](https://github.com/DevonReyesDavidJR/Inkava-Planner/releases/latest).
 2. Trong **Tổng quan → Nguồn dữ liệu**, nhập file booking, file nhận và file giao.
 3. Chọn tuần hoặc ngày, kiểm tra các cảnh báo và xem kế hoạch.
 4. Chọn **Xuất file** để tải kết quả Excel. Phần mềm không ghi đè file gốc.

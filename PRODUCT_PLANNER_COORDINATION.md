@@ -4,9 +4,9 @@ This file is the shared handoff point for every chat or agent working on Product
 
 ## Canonical source
 
-- Repository: `Khiemnguyen198/NguyenCuuKhiem`
+- Repository: `DevonReyesDavidJR/Inkava-Planner`
 - Branch: `master`
-- Public preview: `https://khiemnguyen198.github.io/NguyenCuuKhiem/`
+- GitHub Pages (if enabled): `https://devonreyesdavidjr.github.io/Inkava-Planner/`
 - GPT Sites preview: `https://khiem-production-planner.devonreyes.chatgpt.site/`
 
 Always pull `master` before editing. Do not treat the GPT Sites deployment as the source of truth unless its changes have also been committed to this repository.

@@ -1,6 +1,6 @@
 {
   "name": "inkava-production-planner",
-  "version": "0.0.21",
+  "version": "0.0.22",
   "private": true,
   "type": "module",
   "scripts": {
@@ -27,7 +27,7 @@
   },
   "description": "Inkava Production Planner — đối chiếu booking với nhận / giao bán thành phẩm",
   "main": "electron/main.js",
-  "author": "Khiemnguyen198",
+  "author": "DevonReyesDavidJR",
   "build": {
     "appId": "vn.inkava.planner",
     "productName": "Inkava Planner",
@@ -81,7 +81,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Khiemnguyen198/NguyenCuuKhiem.git"
+    "url": "https://github.com/DevonReyesDavidJR/Inkava-Planner.git"
   },
   "engines": {
     "node": ">=24"
