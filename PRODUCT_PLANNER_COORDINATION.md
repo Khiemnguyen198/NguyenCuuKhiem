@@ -86,3 +86,7 @@ Always pull `master` before editing. Do not treat the GPT Sites deployment as th
 - Warehouse delivery dates are joined from dated positive TOTAL XUẤT transactions in NHẬP XUẤT to TỔNG HỢP by exact PO-SLHĐ, product and colour; SLTL is checked against the booking ticket for dates, without changing quantity matching. Ambiguous or incomplete dates remain blank.
 
 - Export can use an inclusive PXC date range across weeks, using the selected daily allocations and retaining original booking dates. Numeric-looking identifiers stay as text, with Excel number-as-text warnings suppressed.
+
+## Release numbering
+
+- After v0.0.24 and v0.0.25, the next release is v0.1.1 (skip v0.0.26 and v0.1.0), as requested by the owner.
