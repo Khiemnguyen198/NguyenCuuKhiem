@@ -82,3 +82,5 @@ Always pull `master` before editing. Do not treat the GPT Sites deployment as th
 
 - The main delivery plan and TH export display four distinct columns: booking INPUT and OUTPUT, actual BTP receipt, and actual BTP delivery from the company files. Preserve the original booking OUTPUT even in a weekly/day selection; the calculated forecast remains separately labelled.
 - Actual delivery dates come from the company delivery file; if unavailable, a uniquely matched dated NGÀY XUẤT in the receipt file may be used with source attribution. Text statuses and ambiguous or incomplete dates are never converted to delivery dates.
+
+- Warehouse delivery dates are joined from dated positive TOTAL XUẤT transactions in NHẬP XUẤT to TỔNG HỢP by exact PO-SLHĐ, product and colour; SLTL is checked against the booking ticket for dates, without changing quantity matching. Ambiguous or incomplete dates remain blank.

@@ -2,6 +2,10 @@ import { escapeHtml } from './format.js';
 
 // Bundle notes with their version so they remain accurate and available offline.
 const RELEASE_NOTES = {
+  '0.0.19': [
+    'Đọc ngày giao thực tế từ chứng từ xuất trong sheet NHẬP XUẤT của file kho.',
+    'Đối chiếu PO, mã hàng, màu và số phiếu trước khi ghi ngày giao.'
+  ],
   '0.0.18': [
     'Trình bày file Excel rõ ràng hơn, giữ công thức, bộ lọc và bốn cột ngày nhận/giao BTP.',
     'Xóa chức năng phiếu giao nhận BTP.'

@@ -49,3 +49,61 @@ test('reads workbook even if sheet name has trailing spaces or different casing'
   const lines = readWarehouseWorkbook(buffer);
   assert.equal(lines.length, 4);
 });
+
+test('joins dated shipment transactions to matching summary PO and exports that PO only', async () => {
+  const { readWarehouseWorkbook } = await import('../src/warehouse-import.js');
+  const { summarizeLots } = await import('../src/lots.js');
+  const { buildExportWorkbook } = await import('../src/export-workbook.js');
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ['PO', 'MÃ HÀNG', 'MÀU', 'MÙA', 'TỔNG NHẬN', 'TỔNG GIAO', 'GIAO ĐẠT', 'FULL PO'],
+    ['P1-OB', 'R1', '1234567 BLUE', 'SS27', 10, 10, 10, 'P1'],
+    ['P2-OB', 'R1', '1234567 BLUE', 'SS27', 10, 0, 0, 'P2']
+  ]), 'TỔNG HỢP');
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ['NGÀY', 'PO-SLHĐ', 'MÃ HÀNG', 'MÀU', 'TOTAL XUẤT'],
+    [46320, 'P1-OB', 'R1', '1234567 BLUE', 5],
+    [46323, 'P1-OB', 'R1', '1234567 BLUE', 5],
+    [46324, 'P2-OB', 'R1', '1234567 BLUE', 0]
+  ]), 'NHẬP XUẤT');
+  const lines = readWarehouseWorkbook(XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }));
+  assert.equal(lines[0].actualDeliveryDate, '2026-10-28');
+  assert.equal(lines[1].actualDeliveryDate, null);
+  const rows = ['P1', 'P2'].map(po => ({ ref:'R1', color:'1234567 BLUE', modelCode:'1234567', season:'SS27', po, lineQuantity:10, outputDate:'2026-11-01', leadTime:'1 ngày', allocations:{} }));
+  const { items } = summarizeLots({ bookingRows: rows, deliveryLines: lines });
+  const book = buildExportWorkbook({ booking: { rows, days: [] }, lots: items });
+  assert.equal(book.Sheets['KE HOACH GIAO HANG'].L2.v, 46323);
+  assert.equal(book.Sheets['KE HOACH GIAO HANG'].L3, undefined);
+  assert.equal(lines.length, 2, 'transactions must not double-count delivery quantities');
+});
+
+test('does not assign an ambiguous or undated transaction to a contract', async () => {
+  const { attachTransactionDates } = await import('../src/warehouse-import.js');
+  const lines = [
+    { po:'P1', model:'R', color:'1234567 BLUE', season:'SS26', fullPo:'P1' },
+    { po:'P1', model:'R', color:'1234567 BLUE', season:'SS27', fullPo:'P1' },
+    { po:'P2', model:'R', color:'1234567 BLUE', season:'SS27', fullPo:'P2' }
+  ];
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ['NGÀY', 'PO-SLHĐ', 'MÃ HÀNG', 'MÀU', 'TOTAL XUẤT'],
+    [46320, 'P1', 'R', '1234567 BLUE', 1],
+    [46320, 'P2', 'R', '1234567 BLUE', 1],
+    [null, 'P2', 'R', '1234567 BLUE', 1]
+  ]);
+  attachTransactionDates(lines, sheet);
+  assert.deepEqual(lines.map(line => line.actualDeliveryDate), [undefined, undefined, undefined]);
+});
+
+test('checks the SLTL ticket when the warehouse reuses a PO across lots', async () => {
+  const { summarizeLots } = await import('../src/lots.js');
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ['PO', 'MÃ HÀNG', 'MÀU', 'MÙA', 'TỔNG NHẬN', 'TỔNG GIAO', 'GIAO ĐẠT', 'SLTL', 'FULL PO', 'NGÀY GIAO'],
+    ['P1', 'R1', '1234567 BLUE', 'SS26', 10, 10, 10, 73094, 'P1', 46320]
+  ]);
+  const lines = readWarehouseSheet(sheet);
+  assert.equal(lines[0].dateTicket, '73094');
+  assert.equal(lines[0].ticket, '');
+  const rows = [{ ref:'R1', color:'1234567 BLUE', modelCode:'1234567', season:'SS26', po:'P1', ticketNumber:'73628', lineQuantity:10, outputDate:'2026-11-01', leadTime:'1 ngày', allocations:{} }];
+  summarizeLots({ bookingRows: rows, deliveryLines: lines });
+  assert.equal(rows[0].fileDeliveryDate, null);
+});

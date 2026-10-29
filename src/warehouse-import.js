@@ -37,7 +37,52 @@ export function readWarehouseWorkbook(buffer) {
   const sheetName = (workbook.SheetNames || []).find((name) => String(name).replace(/\s+/g, ' ').trim().toUpperCase() === norm);
   const sheet = sheetName ? workbook.Sheets[sheetName] : null;
   if (!sheet) throw new Error(`Không tìm thấy sheet “${SUMMARY_SHEET}” trong file kho.`);
-  return readWarehouseSheet(sheet);
+  const lines = readWarehouseSheet(sheet);
+  const transactionName = (workbook.SheetNames || []).find((name) => normalizeHeader(name) === 'NHẬP XUẤT');
+  if (transactionName) attachTransactionDates(lines, workbook.Sheets[transactionName]);
+  return lines;
+}
+
+// TỔNG HỢP contains accumulated quantities but no dates. NHẬP XUẤT records
+// each movement against its own PO-SLHĐ; join only exact product/PO keys.
+export function attachTransactionDates(lines, sheet) {
+  const table = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true, blankrows: true });
+  const headerIndex = table.slice(0, 20).findIndex((row) => {
+    const labels = row.map(normalizeHeader);
+    return ['PO-SLHĐ', 'MÃ HÀNG', 'MÀU', 'NGÀY', 'TOTAL XUẤT'].every((label) => labels.includes(label));
+  });
+  if (headerIndex < 0) return;
+  const labels = table[headerIndex].map(normalizeHeader);
+  const col = (label) => labels.indexOf(label);
+  const key = (po, model, color) => `${normalizeHeader(po)}|${productKey(model, color)}`;
+  const events = new Map();
+  for (const row of table.slice(headerIndex + 1)) {
+    const po = text(row[col('PO-SLHĐ')]);
+    const model = text(row[col('MÃ HÀNG')]);
+    const color = text(row[col('MÀU')]);
+    if (!po || po === '0' || !model || !color || !(toNumber(row[col('TOTAL XUẤT')]) > 0)) continue;
+    const id = key(po, model, color);
+    const event = events.get(id) || { date: null, incomplete: false };
+    let date = null;
+    try { date = toIsoDate(row[col('NGÀY')]); } catch { /* Invalid dates remain unknown. */ }
+    if (!date) event.incomplete = true;
+    else if (!event.date || date > event.date) event.date = date;
+    events.set(id, event);
+  }
+  const targets = new Map();
+  for (const line of lines) {
+    const id = key(line.po, line.model, line.color);
+    const group = targets.get(id) || [];
+    group.push(line);
+    targets.set(id, group);
+  }
+  for (const [id, event] of events) {
+    const group = targets.get(id) || [];
+    // A date without season or PO detail cannot distinguish different contracts.
+    const identities = new Set(group.map((line) => `${normalizeHeader(line.season)}|${normalizeHeader(line.fullPo || line.po)}`));
+    if (event.incomplete || !event.date || identities.size !== 1) continue;
+    for (const line of group) if (!line.actualDeliveryDate) line.actualDeliveryDate = event.date;
+  }
 }
 
 export function readWarehouseSheet(sheet) {
@@ -54,6 +99,7 @@ export function readWarehouseSheet(sheet) {
     .find((index) => index !== -1) ?? -1;
   // The second PO column holds the production ticket (SỐ PHIẾU) shared with the booking file.
   position.ticket = position.po === -1 ? -1 : labels.indexOf('PO', position.po + 1);
+  position.dateTicket = labels.indexOf('SLTL');
   const cell = (cells, field) => (position[field] === -1 ? null : cells[position[field]]);
 
   return table.slice(headerIndex + 1)
@@ -62,6 +108,7 @@ export function readWarehouseSheet(sheet) {
       po: text(cell(cells, 'po')),
       fullPo: text(cell(cells, 'fullPo')),
       ticket: text(cell(cells, 'ticket')),
+      dateTicket: text(cell(cells, 'dateTicket')),
       model: text(cell(cells, 'model')),
       color: text(cell(cells, 'color')),
       season: text(cell(cells, 'season')),

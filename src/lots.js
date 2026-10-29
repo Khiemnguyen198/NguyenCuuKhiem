@@ -248,7 +248,8 @@ function assignRowDates(lots, receiptLines, deliveryLines) {
   }
   for (const line of deliveryLines) {
     if (!(Number(line.delivered) > 0 || Number(line.good) > 0) || !validDate(line.actualDeliveryDate)) continue;
-    const compatible = compatibleRows(line).filter((row) => !hasTicket(line.ticket) || !hasTicket(row.ticketNumber) || up(line.ticket) === up(row.ticketNumber));
+    const ticket = line.dateTicket || line.ticket;
+    const compatible = compatibleRows(line).filter((row) => !hasTicket(ticket) || !hasTicket(row.ticketNumber) || up(ticket) === up(row.ticketNumber));
     const tokens = [line.fullPo, line.po, String(line.po ?? '').replace(/-(?:OB|TB)$/i, '')].map(up).filter(Boolean);
     let candidates = [];
     for (const token of tokens) {
