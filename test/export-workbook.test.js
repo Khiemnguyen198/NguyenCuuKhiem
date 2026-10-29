@@ -49,20 +49,6 @@ test('fills the progress columns from the FIFO allocation', () => {
   assert.deepEqual([value('Model'), value('Màu'), value('Nhận BTP'), value('Đã in (giao)'), value('Còn thiếu'), value('SLHĐ tổng (lô)'), value('Nối bằng')], ['1234567', 'X', 80, 60, 45, 100, 'FIFO']);
 });
 
-test('builds the delivery slip workbook with totals and signatures', async () => {
-  const { buildSlipWorkbook, slipFilename } = await import('../src/export-workbook.js');
-  const items = [
-    { customer: 'DECATHLON', model: '353234', modelCode: '9046670', color: '9046670 BLEU', season: 'SS27', ticket: '73001', contract: 100, bookedQuantity: 100, received: 100, delivered: 80, good: 75, defects: 5, remaining: 25, dueDate: '2026-11-05', status: 'printing', pinned: true }
-  ];
-  const workbook = buildSlipWorkbook({ items, batch: { label: 'Tuần 26/10 – 01/11' } });
-  assert.deepEqual(workbook.SheetNames, ['PHIEU_GIAO_NHAN_BTP']);
-  const table = XLSX.utils.sheet_to_json(workbook.Sheets.PHIEU_GIAO_NHAN_BTP, { header: 1 });
-  assert.equal(table[0][0], 'CÔNG TY TNHH INKAVA');
-  assert.equal(table[1][0], 'PHIẾU GIAO NHẬN VÀ ĐỐI CHIẾU BÁN THÀNH PHẨM (BTP)');
-  assert.equal(slipFilename(new Date(2026, 9, 28)).startsWith('PHIEU_GIAO_NHAN_BTP_20261028'), true);
-});
-
-
 test('serialized exports preserve numeric calendar dates, row offsets and formulas', () => {
   const rows = [{ line: '1', customer: 'Khách Việt', ref: 'R1', color: '1234567 BLUE',
     modelCode: '1234567', season: 'SS27', po: 'PO1', lineQuantity: 10,
@@ -97,4 +83,32 @@ test('contract TH export includes the matched BTP receipt date and its provenanc
   assert.equal(cell.v, 46321);
   assert.equal(sheet[XLSX.utils.encode_cell({r:5,c:basis})].v, 'FIFO theo mã/mùa');
   assert.equal(sheet.I6.v, 46315, 'Booking INPUT remains intact');
+});
+
+test('formatted download preserves data, cached formulas, filters and styles', async () => {
+  const { serializeWorkbook } = await import('../src/excel-presentation.js');
+  const ExcelJS = (await import('exceljs/dist/exceljs.min.js')).default;
+  const rows = [{ line: '1', customer: 'Khách Việt', ref: 'R1', color: '1234567 BLUE', modelCode: '1234567', season: 'SS27', po: 'PO1', lineQuantity: 10, inputDate: '2026-10-29', outputDate: '2026-10-30', leadTime: '1 ngày', allocations: { 0: 10 } }];
+  const booking = { rows, days: [{ date: '2026-10-29', returnDate: '2026-10-30' }, { date: '2026-10-30', returnDate: '2026-10-31' }] };
+  const { items } = summarizeLots({ bookingRows: rows });
+  const input = buildExportWorkbook({ booking, lots: items });
+  input.Sheets.TH.R2.c = [{ a: 'Kế hoạch', t: 'Kiểm tra ngày' }];
+  const bytes = await serializeWorkbook(input);
+  const result = XLSX.read(bytes, { type: 'buffer', cellNF: true });
+  assert.deepEqual(result.SheetNames, input.SheetNames);
+  assert.equal(result.Sheets['KE HOACH GIAO HANG'].I2.v, 46324);
+  assert.equal(result.Sheets['KE HOACH GIAO HANG'].J2.v, 46325);
+  assert.equal(result.Sheets['KE HOACH GIAO HANG'].J2.z, 'dd/mm/yyyy');
+  assert.equal(result.Sheets['CAN DOI'].H5.f, 'SUM(N5:O5)');
+  assert.equal(result.Sheets['CAN DOI'].H5.v, 10);
+  assert.equal(result.Sheets.TH.R2.c[0].t, 'Kiểm tra ngày');
+  assert.equal(result.Sheets.TH['!autofilter'].ref, input.Sheets.TH['!autofilter'].ref);
+  assert.deepEqual(result.Sheets.TH['!merges'], input.Sheets.TH['!merges']);
+  const styled = new ExcelJS.Workbook();
+  await styled.xlsx.load(bytes);
+  const plan = styled.getWorksheet('KE HOACH GIAO HANG');
+  assert.equal(plan.getCell('I1').fill.fgColor.argb, 'FF245A86');
+  assert.equal(plan.getCell('K1').fill.fgColor.argb, 'FF217163');
+  assert.equal(plan.views[0].ySplit, 1);
+  assert.equal(plan.getColumn(9).width, 20);
 });

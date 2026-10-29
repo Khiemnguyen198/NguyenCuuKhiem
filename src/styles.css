@@ -798,57 +798,6 @@ button.cal-day[aria-pressed="true"] { background: #dff3ea; box-shadow: inset 0 -
 .model-cell-inner { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .pinned-tag { display: inline-block; font-size: 10px; font-weight: 700; color: #b45309; background: #fef3c7; border: 1px solid #fde68a; padding: 1px 6px; border-radius: 999px; line-height: 1.3; }
 
-/* Delivery Slip Modal & Print */
-.slip-dialog { max-width: 1120px; width: 95vw; }
-.slip-content-wrap { padding: 20px 24px; max-height: 72vh; overflow-y: auto; background: #fff; }
-.delivery-slip { color: #0f172a; line-height: 1.4; }
-.slip-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #08233f; padding-bottom: 12px; margin-bottom: 16px; }
-.slip-brand strong { display: block; font-size: 15px; color: #08233f; letter-spacing: .02em; }
-.slip-brand span { font-size: 12px; color: #64748b; }
-.slip-title { text-align: right; }
-.slip-title h1 { font-size: 17px; margin: 0; color: #08233f; font-weight: 700; }
-.slip-subtitle { font-size: 12px; color: #64748b; margin: 4px 0 0; }
-.slip-table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 20px; }
-.slip-table th, .slip-table td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: right; }
-.slip-table th { background: #f1f5f9; color: #1e293b; font-weight: 600; }
-.slip-table .th-left, .slip-table .td-left { text-align: left; }
-.slip-table tfoot th { background: #e2e8f0; font-weight: 700; }
-.slip-signatures { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-top: 24px; text-align: center; }
-.slip-sign-box strong { display: block; font-size: 12px; color: #0f172a; }
-.slip-sign-box .sign-role { display: block; font-size: 11px; color: #64748b; }
-.slip-sign-box .sign-space { height: 65px; }
-.slip-sign-box .sign-hint { font-size: 10px; color: #94a3b8; font-style: italic; }
-
-@media print {
-  body { background: #fff !important; color: #000 !important; }
-  .app-shell > *:not(#slipModal), .export-fab, .modal__backdrop, .settings-dialog__header, .settings-dialog__footer, .toast {
-    display: none !important;
-  }
-  #slipModal {
-    display: block !important;
-    position: static !important;
-    background: transparent !important;
-    padding: 0 !important;
-    margin: 0 !important;
-  }
-  #slipModal .slip-dialog {
-    box-shadow: none !important;
-    border: none !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    padding: 0 !important;
-    margin: 0 !important;
-  }
-  .slip-content-wrap {
-    max-height: none !important;
-    overflow: visible !important;
-    padding: 0 !important;
-  }
-  .slip-table { font-size: 9.5pt; }
-  .slip-table th, .slip-table td { border-color: #333 !important; padding: 4px 6px !important; }
-  @page { size: A4 landscape; margin: 10mm; }
-}
-
 .storage-notice { margin: 0 0 14px; padding: 12px 14px; border-radius: 6px; border: 1px solid #c9d9e5; background: #edf5f9; color: #37536b; font-size: 13px; line-height: 1.5; }
 .storage-notice--error { background: #fff2f2; color: #8d2330; border-color: #e3b0b7; }
 .pending-booking { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; padding: 14px; border: 1px solid #e3b654; border-radius: 6px; background: #fff8e6; }

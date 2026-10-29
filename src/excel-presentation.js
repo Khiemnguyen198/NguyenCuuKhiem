@@ -1,0 +1,57 @@
+import ExcelJS from 'exceljs/dist/exceljs.min.js';
+import * as XLSX from 'xlsx';
+
+const solid = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+const thin = { style: 'thin', color: { argb: 'FFE0E8EF' } };
+const border = { bottom: thin };
+
+// Keep the calculation workbook as the source of truth; ExcelJS writes its presentation
+// without changing dates, cached formula results, filters, comments or merged ranges.
+export async function serializeWorkbook(source) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'INKAVA';
+  workbook.calcProperties.fullCalcOnLoad = true;
+  for (const name of source.SheetNames) {
+    const input = source.Sheets[name];
+    const filter = input['!autofilter']?.ref;
+    const headerRow = name === 'TH' ? 5 : name === 'CAN DOI' ? 4 : filter ? XLSX.utils.decode_range(filter).s.r + 1 : 1;
+    const sheet = workbook.addWorksheet(name, {
+      views: [{ state: 'frozen', ySplit: headerRow }],
+      pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 }
+    });
+    (input['!cols'] || []).forEach((column, index) => {
+      if (column.wch) sheet.getColumn(index + 1).width = column.wch;
+    });
+    if (filter) sheet.autoFilter = filter;
+    for (const [address, item] of Object.entries(input)) {
+      if (address.startsWith('!') || !item || typeof item !== 'object') continue;
+      const cell = sheet.getCell(address);
+      if (item.f) cell.value = { formula: item.f, result: item.v };
+      else if (item.v !== undefined && item.v !== null) cell.value = item.v;
+      if (item.z) cell.numFmt = item.z;
+      if (item.c?.length) cell.note = item.c.map((comment) => comment.t || '').join('\n');
+      const row = cell.row;
+      const header = row === headerRow || (name === 'TH' && row === 1);
+      cell.font = { name: 'Arial', size: 10, color: { argb: 'FF24384A' } };
+      cell.alignment = { vertical: 'middle', wrapText: header };
+      cell.border = border;
+      if (header) {
+        cell.fill = solid('FF173D60');
+        cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.alignment = { vertical: 'middle', wrapText: true };
+        sheet.getRow(row).height = 32;
+        const title = String(item.v || '').toLowerCase();
+        if (title.includes('booking') && title.includes('ngày')) cell.fill = solid('FF245A86');
+        if (title.includes('thực tế') && title.includes('ngày')) cell.fill = solid('FF217163');
+      } else if (row > headerRow && row % 2 === 0) {
+        cell.fill = solid('FFF3F7FA');
+      }
+      if (item.s?.fill?.fgColor?.rgb) {
+        cell.fill = solid(`FF${item.s.fill.fgColor.rgb.slice(-6)}`);
+        cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: `FF${(item.s.font?.color?.rgb || '24384A').slice(-6)}` } };
+      }
+    }
+    for (const merge of input['!merges'] || []) sheet.mergeCells(XLSX.utils.encode_range(merge));
+  }
+  return workbook.xlsx.writeBuffer();
+}

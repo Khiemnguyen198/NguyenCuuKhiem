@@ -43,7 +43,7 @@ Always pull `master` before editing. Do not treat the GPT Sites deployment as th
 - Booking re-imports are compared row by row with the previous import; changes wait for a reviewer's confirmation.
 - The booking is always followed one week at a time (PXC days, Monday–Sunday); quantities and FIFO figures are those of the week's days.
 - "Kiểm tra file" previews the week's export (sources, figures, matching, warnings, rows) before downloading.
-- Export workbook: a single TH sheet (same layout as the booking TH sheet) with row and lot progress columns after the daily plan.
+- Export workbook: delivery plan, TH and CAN DOI sheets with formatted headers, filters, dates and preserved formulas; the separate BTP handover slip has been removed.
 - Booking checks also flag Sunday due dates, missing SLHĐ TỔNG and TH vs lead-time sheet mismatches.
 
 ## Current limitations
