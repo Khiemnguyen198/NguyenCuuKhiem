@@ -12,8 +12,9 @@ async function withServer(run) {
   try {
     await run(api);
   } finally {
-    server.close();
-    rmSync(dataDirectory, { recursive: true, force: true });
+    server.closeAllConnections();
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    rmSync(dataDirectory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 

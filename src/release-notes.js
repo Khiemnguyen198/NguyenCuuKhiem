@@ -20,7 +20,7 @@ const RELEASE_NOTES = {
     'Ghim ưu tiên nhận BTP thủ công (Manual Priority Pinning) cho các đơn hàng gấp.',
     'Xuất và in phiếu giao nhận BTP xưởng (khổ A4 chuẩn kèm 3 chữ ký trách nhiệm).'
   ],
-  '0.0.13': [
+  '0.0.14': [
     'Tính ngày giao dự kiến từ ngày nhận BTP cộng leadtime và thêm một ngày làm việc.',
     'Đối chiếu ngày giao theo PO, cảnh báo chênh lệch và giữ riêng ngày giao thực tế trong file.',
     'Sửa lỗi nhập và lưu dữ liệu; cập nhật biểu tượng bo góc trên Mac.'
