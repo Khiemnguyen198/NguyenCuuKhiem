@@ -71,7 +71,7 @@ test('serialized exports preserve numeric calendar dates, row offsets and formul
 
 test('contract TH export includes the matched BTP receipt date and its provenance', () => {
   const rows = [{ line:'1', ref:'R', color:'1234567 BLUE', modelCode:'1234567', season:'SS27', po:'P', lineQuantity:10, inputDate:'2026-10-20', outputDate:'2026-10-30', printCount:1, leadTime:'1 ngày', allocations:{} }];
-  const receiptLines = [{ model:'R', color:'1234567 BLUE', season:'SS27', po:'', received:10, date:'2026-10-26' }];
+  const receiptLines = [{ model:'R', color:'1234567 BLUE', season:'SS27', po:'P', received:10, date:'2026-10-26' }];
   const { items } = summarizeLots({ bookingRows:rows, receiptLines });
   const book = buildExportWorkbook({ booking:{ rows, days:[] }, lots:items });
   const sheet = XLSX.read(XLSX.write(book,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true}).Sheets.TH;
@@ -81,7 +81,7 @@ test('contract TH export includes the matched BTP receipt date and its provenanc
   assert.ok(column > 0 && basis > 0);
   const cell = sheet[XLSX.utils.encode_cell({r:5,c:column})];
   assert.equal(cell.v, 46321);
-  assert.equal(sheet[XLSX.utils.encode_cell({r:5,c:basis})].v, 'FIFO theo mã/mùa');
+  assert.equal(sheet[XLSX.utils.encode_cell({r:5,c:basis})].v, 'khớp trực tiếp');
   assert.equal(sheet.I6.v, 46315, 'Booking INPUT remains intact');
 });
 
@@ -126,4 +126,15 @@ test('Excel ignores number-as-text indicators without altering identifiers', asy
   const zip = await JSZip.loadAsync(bytes);
   const xml = await zip.file('xl/worksheets/sheet1.xml').async('string');
   assert.match(xml, /<ignoredError numberStoredAsText="1" sqref="A1:B2"\/>/);
+});
+
+test('old receipt of another PO does not produce actual or expected dates in the export', () => {
+  const rows = [{ line:'1', ref:'367450', color:'8975582 WHITE', modelCode:'8975582', season:'SS26', po:'4525013028', ticketNumber:'0', lineQuantity:100, inputDate:'2026-10-23', outputDate:'2026-11-07', printCount:1, leadTime:'1 ngày', allocations:{} }];
+  const receiptLines = [{ model:'367450', color:'8975582', season:'SS26', po:'4524643183', received:100, date:'2026-07-04' }];
+  const { items } = summarizeLots({ bookingRows:rows, receiptLines });
+  const book = buildExportWorkbook({ booking:{ rows, days:[] }, lots:items });
+  assert.equal(book.Sheets['KE HOACH GIAO HANG'].K2, undefined);
+  assert.equal(book.Sheets['KE HOACH GIAO HANG'].M2, undefined);
+  assert.equal(book.Sheets['CAN DOI'].I5, undefined);
+  assert.match(book.Sheets['KE HOACH GIAO HANG'].N2.v, /Chưa xác định ngày nhận BTP/);
 });

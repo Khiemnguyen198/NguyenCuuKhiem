@@ -2,6 +2,10 @@ import { escapeHtml } from './format.js';
 
 // Bundle notes with their version so they remain accurate and available offline.
 const RELEASE_NOTES = {
+  '0.0.21': [
+    'Không ghép nhầm ngày nhận của PO cũ vào hợp đồng mới chỉ theo mã hàng và mùa.',
+    'Chỉ ghi ngày nhận và ngày giao dự kiến khi có đủ căn cứ đối chiếu.'
+  ],
   '0.0.20': [
     'Xuất theo khoảng ngày kế hoạch PXC, kể cả qua nhiều tuần.',
     'Bỏ cảnh báo phân bổ FIFO và thông báo số lưu dạng chữ trong Excel.'

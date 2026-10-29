@@ -253,21 +253,31 @@ test('a missing receipt date prevents claiming the latest receipt date even for 
   assert.equal(bookingRows[0].receiptDateBasis, null);
 });
 
-test('dated receipts without a ticket follow the same product FIFO as allocated quantities', async () => {
+test('unmatched historical POs never provide receipt dates to later bookings', async () => {
   const { compactReceiptLines } = await import('../src/receipts-import.js');
-  const makeRows = () => [row('PO-A', 40, '2026-11-05', { ticketNumber: '0' }), row('PO-B', 60, '2026-11-06', { ticketNumber: '0' })];
-  const receipts = [
-    { model: '353234', color: '9046670 1P BEA', season: 'SS27', po: '', received: 50, date: '2026-10-26' },
-    { model: '353234', color: '9046670 1P BEA', season: 'SS27', po: '', received: 50, date: '2026-10-28' }
-  ];
+  const makeRows = () => [row('PO-NEW', 40, '2026-11-05', { ticketNumber: '0', inputDate: '2026-10-23' })];
+  const receipts = [{ model:'353234', color:'9046670 1P BEA', season:'SS27', po:'PO-OLD', received:40, date:'2026-07-04' }];
   for (const lines of [receipts, compactReceiptLines(receipts)]) {
     const rows = makeRows();
-    summarizeLots({ bookingRows: rows, receiptLines: lines });
-    assert.deepEqual(rows.map(r => [r.receivedFifo, r.receiptDate, r.receiptDateBasis]), [[40, '2026-10-26', 'FIFO theo mã/mùa'], [60, '2026-10-28', 'FIFO theo mã/mùa']]);
+    summarizeLots({ bookingRows:rows, receiptLines:lines });
+    assert.equal(rows[0].receiptDate, null);
+    assert.equal(rows[0].receiptDateBasis, null);
   }
-  const rows = makeRows();
-  summarizeLots({ bookingRows: rows, receiptLines: [receipts[0], { ...receipts[1], date: null }] });
+});
+
+test('shared-ticket dates before the individual booking INPUT are not inferred', () => {
+  const rows = [row('PO-A', 40, '2026-11-05', { ticketNumber:'111', inputDate:'2026-10-23' }), row('PO-B', 60, '2026-11-06', { ticketNumber:'111', inputDate:'2026-10-23' })];
+  const base = { model:'353234', color:'9046670 1P BEA', season:'SS27', po:'111' };
+  summarizeLots({ bookingRows:rows, receiptLines:[{...base,received:50,date:'2026-07-04'},{...base,received:50,date:'2026-10-27'}] });
   assert.deepEqual(rows.map(r => r.receiptDate), [null, null]);
+});
+
+test('a directly matched PO retains its recorded early receipt date for review', () => {
+  const rows = [row('PO-A', 10, '2026-11-05', { ticketNumber:'0', inputDate:'2026-10-23' })];
+  const receiptLines = [{ model:'353234', color:'9046670 1P BEA', season:'SS27', po:'PO-A', received:10, date:'2026-07-04' }];
+  summarizeLots({ bookingRows:rows, receiptLines });
+  assert.equal(rows[0].receiptDate, '2026-07-04');
+  assert.equal(rows[0].receiptDateBasis, 'khớp trực tiếp');
 });
 
 test('matches a unique receipt ticket and REF when the receipt colour is a short code', () => {

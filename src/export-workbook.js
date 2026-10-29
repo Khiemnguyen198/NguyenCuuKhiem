@@ -3,6 +3,7 @@ import { STATUS_COPY, colorName } from './models-view.js';
 import { dailyLoad } from './booking-import.js';
 import { ISSUE_GROUPS, sheetIssueList } from './check-view.js';
 import { deliveryTiming } from './delivery-timing.js';
+import { confirmedReceiptDate } from './lots.js';
 
 const pad = (value) => String(value).padStart(2, '0');
 
@@ -178,11 +179,12 @@ function canDoiSheet({ booking, lots }) {
   const groups = new Map();
   for (const row of rows) {
     const key = [row.lotKey, row.printCount, row.leadTime].join('|');
-    const group = groups.get(key) || { row, lot: lotsByKey.get(row.lotKey), days: days.map(() => 0), received: 0, delivered: 0, good: 0 };
+    const group = groups.get(key) || { row, lot: lotsByKey.get(row.lotKey), days: days.map(() => 0), rows: [], received: 0, delivered: 0, good: 0 };
     kept.forEach(({ index }, position) => {
       const value = row.allocations?.[index];
       if (typeof value === 'number') group.days[position] += value;
     });
+    group.rows.push(row);
     group.received += row.receivedFifo || 0;
     group.delivered += row.deliveredFifo || 0;
     group.good += row.goodFifo || 0;
@@ -222,7 +224,7 @@ function canDoiSheet({ booking, lots }) {
       `${group.row.ref}${group.row.modelCode}${contract}`,
       group.row.ref, group.row.modelCode, group.row.season, numberCell(contract), numberCell(Number(group.row.printCount) || 0, '0'), group.row.leadTime,
       formulaCell(`SUM(${letter(firstDay)}${excelRow}:${letter(firstDay + Math.max(days.length, 1) - 1)}${excelRow})`, Math.round(weekTotal)),
-      dateCell(group.lot?.lastReceiptDate, 'dd/mm'),
+      dateCell(confirmedReceiptDate(group.rows), 'dd/mm'),
       numberCell(Math.round(group.received)), numberCell(Math.round(group.delivered)), numberCell(Math.round(group.good)),
       formulaCell(`L${excelRow}-H${excelRow}`, Math.round(group.good - weekTotal)),
       ...group.days.map((value) => (value ? numberCell(Math.round(value * 100) / 100) : null))

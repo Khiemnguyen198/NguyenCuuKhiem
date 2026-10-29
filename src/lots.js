@@ -180,11 +180,13 @@ function assignRowDates(lots, receiptLines, deliveryLines) {
     let eventLeft = events[0]?.received || 0;
     for (const row of candidates) {
       let need = row.receivedFifo;
+      let predatesBooking = false;
       while (need > 0 && eventIndex < events.length) {
         const used = Math.min(need, eventLeft);
         if (used > 0) {
           row.receiptDate = events[eventIndex].date;
           row.receiptDateBasis = 'FIFO theo phiếu';
+          if (validDate(row.inputDate) && events[eventIndex].date < row.inputDate) predatesBooking = true;
         }
         need -= used;
         eventLeft -= used;
@@ -193,59 +195,13 @@ function assignRowDates(lots, receiptLines, deliveryLines) {
           eventLeft = events[eventIndex]?.received || 0;
         }
       }
+      // The same ticket may be reused for a later booking; do not attribute old
+      // receipts to a PO solely by allocation when they precede its INPUT.
+      if (predatesBooking) { row.receiptDate = null; row.receiptDateBasis = null; }
     }
   }
-  // When the receipt has no matching ticket, quantities are already distributed
-  // by product/season FIFO above. Apply the same order to dated receipt events.
-  const pooledReceipts = new Map();
-  for (const line of receiptLines) {
-    if (!(Number(line.received) > 0)) continue;
-    const product = productOf(line.model, modelCodeOf(line.color));
-    const token = up(line.po);
-    const rows = compatibleRows(line);
-    // Directly matched tickets belong to the ticket path; explicit PO matches
-    // can conflict with quantity FIFO and must not be guessed as a pool.
-    if (token && rows.some(row => hasTicket(row.ticketNumber) && up(row.ticketNumber) === token)) continue;
-    const season = resolveSeason(product, line.season);
-    if (season == null) continue;
-    const key = `${product}|${season}`;
-    const group = pooledReceipts.get(key) || { lines: [], ambiguous: false };
-    if (token && rows.some(row => up(row.po) === token)) group.ambiguous = true;
-    group.lines.push(line);
-    pooledReceipts.set(key, group);
-  }
-  for (const [key, group] of pooledReceipts) {
-    if (group.ambiguous) continue;
-    const targets = lots.filter(lot => `${lot.product}|${up(lot.season)}` === key && !lot.ticketFields.has('received'))
-      .sort((a, b) => (Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))) || String(a.firstDue || '9').localeCompare(String(b.firstDue || '9')));
-    const rows = targets.flatMap(lot => lot.rows).filter(row => row.receivedFifo > 0);
-    if (!rows.length || rows.some(row => row.receiptDate || !Number.isSafeInteger(row.receivedFifo))) continue;
-    const events = [];
-    let complete = true;
-    for (const line of group.lines) {
-      if (!Number.isSafeInteger(Number(line.received))) { complete = false; break; }
-      if (Array.isArray(line.receiptDates)) {
-        if (line.undatedReceived || line.receiptDates.some(item => !validDate(item.date) || !Number.isSafeInteger(item.received) || item.received <= 0)
-          || line.receiptDates.reduce((sum, item) => sum + item.received, 0) !== Number(line.received)) { complete = false; break; }
-        events.push(...line.receiptDates);
-      } else if ((line.receipts ?? 1) === 1 && validDate(line.date)) {
-        events.push({ date: line.date, received: Number(line.received) });
-      } else { complete = false; break; }
-    }
-    if (!complete || events.reduce((sum, item) => sum + item.received, 0) < rows.reduce((sum, row) => sum + row.receivedFifo, 0)) continue;
-    events.sort((a, b) => a.date.localeCompare(b.date));
-    let index = 0, left = events[0]?.received || 0;
-    for (const row of rows) {
-      let needed = row.receivedFifo;
-      while (needed > 0 && index < events.length) {
-        const share = Math.min(needed, left);
-        if (share > 0) { row.receiptDate = events[index].date; row.receiptDateBasis = 'FIFO theo mã/mùa'; }
-        needed -= share;
-        left -= share;
-        if (!left) { index++; left = events[index]?.received || 0; }
-      }
-    }
-  }
+  // Pooled quantities are useful for planning, but a product/season match alone
+  // cannot prove which PO received an old event. Do not invent receipt dates.
   for (const line of deliveryLines) {
     if (!(Number(line.delivered) > 0 || Number(line.good) > 0) || !validDate(line.actualDeliveryDate)) continue;
     const ticket = line.dateTicket || line.ticket;
@@ -322,6 +278,14 @@ function pourIntoDays(row) {
     }
   }
   return result;
+}
+
+// A lot or period has a last receipt date only if each received PO has a
+// substantiated date. A pooled quantity alone is not evidence of a date.
+export function confirmedReceiptDate(rows) {
+  const received = rows.filter((row) => row.receivedFifo > 0);
+  if (!received.length || received.some((row) => !row.receiptDate)) return null;
+  return received.map((row) => row.receiptDate).sort().at(-1);
 }
 
 export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLines = [], today = new Date(), pinnedLots = new Set() } = {}) {
@@ -490,7 +454,7 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
     leadTime: lot.leadTime,
     dueDate: lot.dueDate,
     firstDue: lot.firstDue,
-    lastReceiptDate: lot.lastReceiptDate || null,
+    lastReceiptDate: confirmedReceiptDate(lot.rows),
     actualDeliveryDate: lot.actualDeliveryDate || null,
     pinned: Boolean(lot.pinned),
     matchedBy: [...lot.matched].join(' + ') || 'chưa có',
@@ -544,6 +508,7 @@ export function restrictToRows(items, toRow, today = new Date()) {
       ...item,
       rows,
       rowCount: rows.length,
+      lastReceiptDate: confirmedReceiptDate(rows),
       poCount: new Set(rows.map((row) => row.po)).size,
       contract: Math.round(sum('lineQuantity')),
       bookedQuantity: Math.round(sum('lineQuantity')),
