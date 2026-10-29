@@ -2,6 +2,10 @@ import { escapeHtml } from './format.js';
 
 // Bundle notes with their version so they remain accurate and available offline.
 const RELEASE_NOTES = {
+  '0.0.20': [
+    'Xuất theo khoảng ngày kế hoạch PXC, kể cả qua nhiều tuần.',
+    'Bỏ cảnh báo phân bổ FIFO và thông báo số lưu dạng chữ trong Excel.'
+  ],
   '0.0.19': [
     'Đọc ngày giao thực tế từ chứng từ xuất trong sheet NHẬP XUẤT của file kho.',
     'Đối chiếu PO, mã hàng, màu và số phiếu trước khi ghi ngày giao.'

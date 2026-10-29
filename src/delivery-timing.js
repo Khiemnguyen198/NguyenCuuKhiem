@@ -56,7 +56,6 @@ export function deliveryTiming(row, order = {}) {
   if (!receiptDate) warnings.push('Chưa xác định ngày nhận BTP');
   else if (leadTimeDays(leadTime) == null) warnings.push('Leadtime không hợp lệ');
   else if (!expectedDate) warnings.push('Không tính được ngày giao dự kiến');
-  if (receiptDate && row.receiptDateBasis?.startsWith('FIFO')) warnings.push(`Ngày nhận phân bổ ${row.receiptDateBasis}`);
   if (receiptDate && validDate(row.inputDate) && receiptDate < row.inputDate) warnings.push('Ngày nhận trước INPUT booking: cần kiểm tra');
   if (!fileDate) warnings.push('Chưa có ngày giao theo file');
   else if (row.fileDeliveryDateBasis === 'Ngày xuất file nhận') warnings.push('Ngày giao từ cột NGÀY XUẤT file nhận');

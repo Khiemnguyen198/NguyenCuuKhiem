@@ -804,3 +804,10 @@ button.cal-day[aria-pressed="true"] { background: #dff3ea; box-shadow: inset 0 -
 .pending-booking div { min-width: 0; overflow-wrap: anywhere; }
 .pending-booking p { margin: 6px 0 0; line-height: 1.5; font-size: 13px; }
 .pending-booking[hidden], .storage-notice[hidden] { display: none; }
+
+.export-scope { padding: 14px 24px; background: #f4f8fb; border-bottom: 1px solid var(--line); }
+.export-scope label { display: inline-flex; flex-direction: column; gap: 5px; color: #37536b; font-size: 13px; font-weight: 600; }
+.export-scope select, .export-scope input { min-height: 36px; padding: 6px 9px; border: 1px solid #c9d9e5; border-radius: 6px; background: #fff; color: #18344d; }
+.export-scope__dates:not([hidden]) { display: inline-flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-left: 16px; }
+.export-scope__dates small { color: #526c7c; padding-bottom: 8px; }
+@media (max-width: 650px) { .export-scope__dates:not([hidden]) { display: flex; margin: 10px 0 0; } }

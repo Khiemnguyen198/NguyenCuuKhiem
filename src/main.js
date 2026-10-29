@@ -2,7 +2,7 @@ import '@phosphor-icons/web/regular';
 import './styles.css';
 import { analyzeBookingRows } from './local-ai.js';
 import { crossCheckSheets, readBooking, readWorkbook, summarizeBooking } from './booking-import.js';
-import { batchRow, batchRows, defaultWeekKey, weeksFromDays } from './batches.js';
+import { batchRow, batchRows, defaultWeekKey, rangeBatch, weeksFromDays } from './batches.js';
 import { workWeekLabel } from './calendar.js';
 import { escapeHtml, formatFileDate, formatNumber } from './format.js';
 import { getPinnedLots, readJson, savePinnedLots, writeJson, writeJsonEntries } from './storage.js';
@@ -441,8 +441,7 @@ function selectedBatch() {
 }
 
 // The booking as the rest of the page sees it: the whole file, or only the selected batch.
-function activeBooking() {
-  const week = selectedBatch();
+function scopedBooking(week) {
   if (!week) return { ...latestBooking, rows: bookingDetail.rows, days: bookingDetail.days };
   const rows = batchRows(bookingDetail.rows, bookingDetail.days, week);
   const days = week.dayIndexes.map((index) => bookingDetail.days[index]);
@@ -450,6 +449,15 @@ function activeBooking() {
   const position = new Map(week.dayIndexes.map((index, order) => [String(index), String(order)]));
   const batchOnly = rows.map((row) => ({ ...row, allocations: Object.fromEntries(Object.entries(row.allocations).map(([index, value]) => [position.get(index), value])) }));
   return { ...latestBooking, ...summarizeBooking(rows), batch: week, rows: batchOnly, days };
+}
+
+function activeBooking() {
+  return scopedBooking(selectedBatch());
+}
+
+function exportBooking() {
+  if (document.querySelector('#exportScope').value !== 'range') return activeBooking();
+  return scopedBooking(rangeBatch(bookingDetail.days, document.querySelector('#exportFrom').value, document.querySelector('#exportTo').value));
 }
 
 function renderBatchOptions() {
@@ -783,9 +791,21 @@ function checkSources() {
 
 function renderCheck() {
   if (!warehouseSummary) return;
-  const booking = activeBooking();
-  document.querySelector('#checkReport').innerHTML = renderCheckReport({ booking, summary: warehouseSummary, sources: checkSources(), aiReport: latestAiReport, sheetCheck: bookingDetail.sheetCheck });
-  const issues = checkIssues({ booking, summary: warehouseSummary });
+  let booking;
+  try {
+    booking = exportBooking();
+  } catch (error) {
+    document.querySelector('#checkReport').innerHTML = '';
+    document.querySelector('#checkStatus').textContent = error.message;
+    document.querySelector('#checkModal [data-export]').disabled = true;
+    return;
+  }
+  const items = booking.batch
+    ? [...restrictToRows(lotSummary.items, (row) => batchRow(row, bookingDetail.days, booking.batch)), ...lotSummary.items.filter((item) => item.outsideBooking)]
+    : lotSummary.items;
+  const summary = { items, ...totalsOf(items) };
+  document.querySelector('#checkReport').innerHTML = renderCheckReport({ booking, summary, sources: checkSources(), aiReport: latestAiReport, sheetCheck: bookingDetail.sheetCheck });
+  const issues = checkIssues({ booking, summary });
   document.querySelector('#checkStatus').textContent = issues.join(' ') || `Sẵn sàng xuất ${formatNumber.format(booking.rows?.length || 0)} dòng.`;
   document.querySelector('#checkModal [data-export]').disabled = Boolean(issues.length);
 }
@@ -806,7 +826,7 @@ function closeCheck() {
 
 async function exportSummary() {
   if (!warehouseSummary) throw new Error('Chưa có dữ liệu để xuất.');
-  const booking = activeBooking();
+  const booking = exportBooking();
   const filename = exportFilename(new Date(), booking.batch);
   if (!booking.rows?.length) throw new Error('Chưa có dữ liệu booking chi tiết. Nhập lại file booking trước khi xuất.');
   const workbook = buildExportWorkbook({ booking, lots: lotSummary.items, sheetCheck: bookingDetail.sheetCheck });
@@ -1289,24 +1309,19 @@ checkReport.addEventListener('click', async (event) => {
     showToast(error.message, 'error');
   }
 });
-document.querySelector('#exportFab').addEventListener('click', async () => {
-  const fab = document.querySelector('#exportFab');
-  const issues = checkIssues({ booking: activeBooking(), summary: warehouseSummary });
-  // Something blocks the export: show the check so the planner sees why.
-  if (issues.length) {
-    openCheck();
-    showToast(issues.join(' '), 'error');
-    return;
+document.querySelector('#exportFab').addEventListener('click', openCheck);
+document.querySelector('#exportScope').addEventListener('change', (event) => {
+  document.querySelector('#exportDates').hidden = event.target.value !== 'range';
+  if (event.target.value === 'range') {
+    const current = selectedBatch();
+    const from = document.querySelector('#exportFrom');
+    const to = document.querySelector('#exportTo');
+    if (!from.value && current) from.value = current.from;
+    if (!to.value && current) to.value = current.to;
   }
-  fab.disabled = true;
-  try {
-    await exportSummary();
-  } catch (error) {
-    showToast(error.message, 'error');
-  } finally {
-    fab.disabled = false;
-  }
+  renderCheck();
 });
+for (const id of ['#exportFrom', '#exportTo']) document.querySelector(id).addEventListener('change', renderCheck);
 document.querySelectorAll('[data-close-check]').forEach((button) => button.addEventListener('click', closeCheck));
 document.querySelectorAll('[data-export]').forEach((button) => button.addEventListener('click', async () => {
   // withBusyButton returns null when the export failed; keep the dialog open to show why.

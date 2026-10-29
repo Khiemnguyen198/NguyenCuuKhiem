@@ -30,6 +30,14 @@ write('booking.xlsx','TH',[[],[],[],[],header,
  [1,'DECATHLON','353234','9046670 BLUE','PO-1','SS27',10,serial('2026-10-01'),serial('2026-11-09'),'9046670','70001',10,1,'1 ngày'],
  [2,'DECATHLON','353234','9046670 BLUE','PO-2','SS27',15,serial('2026-10-02'),serial('2026-11-10'),'9046670','70002',15,1,'2 ngày'],
  [3,'DECATHLON','353234','9046670 BLUE','PO-3','SS27',20,serial('2026-10-03'),serial('2026-11-11'),'9046670','70003',20,1,'3 ngày']]);
+const pad = Array(14).fill(null);
+write('range.xlsx','TH',[
+ [...pad,'PXC CHUYỂN',serial('2026-10-26'),serial('2026-10-27'),serial('2026-11-02')],
+ [...pad,'PXI TRẢ',serial('2026-10-27'),serial('2026-10-28'),serial('2026-11-03')],
+ [],[],[...header,null,null,null,null],
+ [1,'DECATHLON','353234','9046670 BLUE','PO-1','SS27',10,serial('2026-10-01'),serial('2026-11-09'),'9046670','70001',10,1,'1 ngày',null,2,3,5],
+ [2,'DECATHLON','353235','9046671 BLUE','PO-2','SS27',5,serial('2026-10-01'),serial('2026-11-09'),'9046671','70002',5,1,'1 ngày',null,5,null,null]
+]);
 write('receipts.xlsx','DATA',[
  ['NGÀY NHẬN','KHÁCH HÀNG','MÃ HÀNG','MÀU','PO','SS','TỔNG NHẬN','TỔNG XUẤT'],
  [serial('2026-10-30'),'DECATHLON','353234','9046670 BLUE','70001','SS27',10,0],
@@ -89,8 +97,9 @@ def check_mode(browser, url, directory, label):
     assert 'khác' in assert_cells(page,'PO-1','30/10/2026','04/11/2026','02/11/2026').lower()
     assert 'khác' not in assert_cells(page,'PO-2','31/10/2026','04/11/2026','04/11/2026').lower()
     assert_cells(page,'PO-3','—','—','—')
+    page.locator('#exportFab').click()
     with page.expect_download(timeout=15000) as download_info:
-        page.locator('#exportFab').click()
+        page.locator('#checkModal [data-export]').click()
     output=directory / f'export-{label}.xlsx'
     download_info.value.save_as(output)
     serialized=subprocess.run(['node','--input-type=module','-e',CHECK_EXPORT,str(output)],cwd=ROOT,check=True,capture_output=True,text=True,env={**os.environ, 'TZ':'UTC'})
@@ -109,6 +118,37 @@ def check_mode(browser, url, directory, label):
     print(f'PASS {label}: source files, per-PO dates and warnings, downloaded workbook')
 
 
+def check_range(browser, url, directory):
+    context=browser.new_context(timezone_id='Asia/Ho_Chi_Minh',viewport={'width':1440,'height':1024},accept_downloads=True)
+    page=context.new_page()
+    helpers.wait_ready(page,url)
+    upload(page,directory,'booking','range.xlsx')
+    helpers.close_changes(page)
+    page.locator('.nav__item[data-page="Kế hoạch"]').click()
+    page.locator('#exportFab').click()
+    page.locator('#exportScope').select_option('range')
+    page.locator('#exportFrom').fill('2026-10-27')
+    page.locator('#exportTo').fill('2026-11-02')
+    expect(page.locator('#checkStatus')).to_contain_text('1 dòng')
+    with page.expect_download(timeout=15000) as info:
+        page.locator('#checkModal [data-export]').click()
+    output=directory/'range-export.xlsx'
+    info.value.save_as(output)
+    code = r"""
+import * as XLSX from 'xlsx'; import {readFileSync} from 'node:fs';
+const wb=XLSX.read(readFileSync(process.argv[1]),{type:'buffer'});
+const th=XLSX.utils.sheet_to_json(wb.Sheets.TH,{header:1,defval:null});
+const plan=XLSX.utils.sheet_to_json(wb.Sheets['KE HOACH GIAO HANG'],{header:1,defval:null});
+console.log(JSON.stringify({header:th[0], rows:plan.slice(1)}));
+"""
+    result=json.loads(subprocess.run(['node','--input-type=module','-e',code,str(output)],cwd=ROOT,check=True,capture_output=True,text=True).stdout)
+    assert len(result['rows'])==1 and result['rows'][0][2]=='PO-1',result
+    assert result['rows'][0][4]==8,result
+    assert '_TU_20261027_DEN_20261102_' in info.value.suggested_filename
+    context.close()
+    print('PASS range: inclusive cross-week PXC selection and quantity')
+
+
 def main():
     executable=os.environ.get('CHROMIUM_EXECUTABLE') or shutil.which('chromium') or shutil.which('google-chrome')
     if not executable:
@@ -121,6 +161,7 @@ def main():
             try:
                 with helpers.vite_server(directory/'local-data') as url:
                     check_mode(browser,url,directory,'local')
+                    check_range(browser,url,directory)
                 with helpers.vite_server(directory/'static-data',static=True) as url:
                     check_mode(browser,url,directory,'static')
             finally:

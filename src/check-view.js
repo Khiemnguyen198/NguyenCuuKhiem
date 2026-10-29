@@ -53,7 +53,7 @@ function renderSheetIssues(sheetCheck, booking) {
     <div><strong>${number(issues.length)}</strong><span>lỗi trong ${number(sheetCheck.cells.rowCount || 0)} dòng TH</span></div>
     <div class="issue-summary--fixed"><strong>${number(fixed)}</strong><span>sẽ tự sửa khi xuất</span></div>
     <div class="issue-summary--review"><strong>${number(issues.length - fixed)}</strong><span>cần người kế hoạch kiểm tra</span></div>
-    <div><strong>${number(issues.filter(inWeek).length)}</strong><span>thuộc tuần đang chọn</span></div>
+    <div><strong>${number(issues.filter(inWeek).length)}</strong><span>thuộc phạm vi đang chọn</span></div>
   </div>
   <table class="issue-overview"><tbody>${groups.map(({ info, items }) => `<tr><th>${escapeHtml(info.title)}</th><td>${number(items.length)}</td><td>${info.autoFix ? '<span class="result-pill result-pill--ok">tự sửa khi xuất</span>' : '<span class="result-pill result-pill--warn">cần kiểm tra</span>'}</td></tr>`).join('')}</tbody></table>
   <label class="issue-search"><i class="ph ph-magnifying-glass"></i><input type="search" data-issue-search placeholder="Tìm theo ô (M2450), PO, mã hàng, số phiếu…" /></label>`;
@@ -70,7 +70,7 @@ function renderSheetIssues(sheetCheck, booking) {
         <td class="th-left">${escapeHtml(issue.ref || '—')}<small title="${escapeHtml(issue.color || '')}">${escapeHtml(colorName(issue.color) || '')}</small></td>
         <td class="issue-value">${cellValue(issue.value)}</td>
         <td class="issue-expected">${cellValue(issue.expected)}</td>
-        <td>${info.autoFix ? '<span class="result-pill result-pill--ok">Tự sửa</span>' : '<span class="result-pill result-pill--warn">Kiểm tra</span>'}${inWeek(issue) ? '<span class="result-pill result-pill--info">tuần này</span>' : ''}</td>
+        <td>${info.autoFix ? '<span class="result-pill result-pill--ok">Tự sửa</span>' : '<span class="result-pill result-pill--warn">Kiểm tra</span>'}${inWeek(issue) ? '<span class="result-pill result-pill--info">phạm vi này</span>' : ''}</td>
       </tr>
       <tr class="issue-detail"><td colspan="6">
         <p><b>Lý do:</b> ${escapeHtml(issue.reason || '')}</p>
@@ -80,7 +80,7 @@ function renderSheetIssues(sheetCheck, booking) {
     </tbody>`;
     }).join('');
     return `<details class="issue-group issue-group--${info.severity}"${weekCount ? ' open' : ''}>
-      <summary><strong>${escapeHtml(info.title)}</strong><span>${number(items.length)} lỗi${weekCount ? ` · ${number(weekCount)} trong tuần này` : ''} · ${info.autoFix ? 'tự sửa khi xuất' : 'cần kiểm tra'}</span></summary>
+      <summary><strong>${escapeHtml(info.title)}</strong><span>${number(items.length)} lỗi${weekCount ? ` · ${number(weekCount)} trong phạm vi này` : ''} · ${info.autoFix ? 'tự sửa khi xuất' : 'cần kiểm tra'}</span></summary>
       <div class="table-wrap"><table class="delivery-table issue-table"><thead><tr><th>Ô</th><th class="th-left">Dòng trong file</th><th class="th-left">Mã hàng · Màu</th><th>Trong file</th><th>Đúng ra</th><th>Xử lý</th></tr></thead>${rows}</table></div>
       ${items.length > ISSUES_SHOWN ? `<p class="check-note">Hiện ${number(ISSUES_SHOWN)} / ${number(items.length)} lỗi — tải danh sách lỗi để xem đủ.</p>` : ''}
     </details>`;
@@ -118,7 +118,7 @@ function sourceRow(title, source, required) {
 
 export function checkIssues({ booking, summary }) {
   const issues = [];
-  if (!booking.rows?.length) issues.push('Không có dòng booking nào trong tuần đã chọn.');
+  if (!booking.rows?.length) issues.push('Không có dòng booking nào trong phạm vi đã chọn.');
   return issues;
 }
 
@@ -137,8 +137,8 @@ export function renderCheckReport({ booking, summary, sources, aiReport, sheetCh
   const facts = [
     ['Dòng booking', number(rows.length), `${number(new Set(rows.map((row) => row.po)).size)} PO`],
     ['Lô (mã · model · mùa)', number(lots.length), `${number(new Set(lots.map((item) => item.model)).size)} mã hàng`],
-    ['Số lượng của tuần', number(totals.contract), `${number(load)} lượt hình`],
-    ['Đã nhận BTP', number(totals.received), totals.contract ? `${Math.round((totals.received / totals.contract) * 100)}% số lượng tuần` : '—'],
+    ['Số lượng trong phạm vi', number(totals.contract), `${number(load)} lượt hình`],
+    ['Đã nhận BTP', number(totals.received), totals.contract ? `${Math.round((totals.received / totals.contract) * 100)}% số lượng trong phạm vi` : '—'],
     ['Đã in (giao)', number(totals.delivered), `lỗi ${number(totals.defects)}`],
     ['Còn thiếu', number(totals.remaining), `${number(totals.overdue)} lô trễ hạn`]
   ].map(([label, value, note]) => `<div><span>${label}</span><strong>${value}</strong><small>${note}</small></div>`).join('');
@@ -185,8 +185,8 @@ export function renderCheckReport({ booking, summary, sources, aiReport, sheetCh
       ${issueCount ? '<p class="check-note">Đây là lỗi trong dữ liệu nhập của sheet TH. Khi xuất, PXI TRẢ gõ nhầm năm được sửa (ô có ghi chú giá trị cũ); SLHĐ TỔNG, TỔNG NGÀY, TỔNG TUẦN luôn được tính lại; các lỗi còn lại cần người kế hoạch sửa trong file booking.</p>' : ''}
     </section>
     <section class="check-block"><h3>Xem trước ${number(Math.min(PREVIEW_ROWS, rows.length))} / ${number(rows.length)} dòng sẽ xuất</h3>
-      <div class="table-wrap"><table class="delivery-table check-preview"><thead><tr><th>PO</th><th class="th-left">Mã hàng</th><th class="th-left">Model</th><th class="th-left">Màu</th><th>SL tuần</th><th>Nhận BTP</th><th>Đã in (giao)</th><th>Còn thiếu</th><th>Hạn giao</th><th>Trạng thái lô</th></tr></thead>
+      <div class="table-wrap"><table class="delivery-table check-preview"><thead><tr><th>PO</th><th class="th-left">Mã hàng</th><th class="th-left">Model</th><th class="th-left">Màu</th><th>SL trong phạm vi</th><th>Nhận BTP</th><th>Đã in (giao)</th><th>Còn thiếu</th><th>Hạn giao</th><th>Trạng thái lô</th></tr></thead>
       <tbody>${preview || '<tr><td colspan="10" class="delivery-table__empty">Không có dòng nào.</td></tr>'}</tbody></table></div>
-      <p class="check-note">File xuất gồm 2 sheet: TH (giống file booking, chỉ các dòng và ngày của tuần) và CAN DOI (mỗi lô một dòng, số lượng từng ngày, Thực nhận / Đã in / Đã giao / GAP lấy từ file nhận và file giao).</p>
+      <p class="check-note">File xuất gồm 3 sheet: KẾ HOẠCH GIAO HÀNG, TH và CAN DOI, theo phạm vi ngày đã chọn.</p>
     </section>`;
 }

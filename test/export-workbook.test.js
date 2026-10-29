@@ -112,3 +112,18 @@ test('formatted download preserves data, cached formulas, filters and styles', a
   assert.equal(plan.views[0].ySplit, 1);
   assert.equal(plan.getColumn(9).width, 20);
 });
+
+
+test('Excel ignores number-as-text indicators without altering identifiers', async () => {
+  const { serializeWorkbook } = await import('../src/excel-presentation.js');
+  const JSZip = (await import('jszip')).default;
+  const source = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(source, XLSX.utils.aoa_to_sheet([['PO', 'Mã'], ['001234', '12345678901234567']]), 'Dữ liệu');
+  const bytes = await serializeWorkbook(source);
+  const sheet = XLSX.read(bytes, { type: 'buffer' }).Sheets['Dữ liệu'];
+  assert.equal(sheet.A2.v, '001234');
+  assert.equal(sheet.B2.v, '12345678901234567');
+  const zip = await JSZip.loadAsync(bytes);
+  const xml = await zip.file('xl/worksheets/sheet1.xml').async('string');
+  assert.match(xml, /<ignoredError numberStoredAsText="1" sqref="A1:B2"\/>/);
+});

@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs/dist/exceljs.min.js';
 import * as XLSX from 'xlsx';
+import JSZip from 'jszip';
 
 const solid = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
 const thin = { style: 'thin', color: { argb: 'FFE0E8EF' } };
@@ -53,5 +54,18 @@ export async function serializeWorkbook(source) {
     }
     for (const merge of input['!merges'] || []) sheet.mergeCells(XLSX.utils.encode_range(merge));
   }
-  return workbook.xlsx.writeBuffer();
+  // Excel treats numeric identifiers as text by design: keeping them as text
+  // preserves leading zeroes and values longer than its 15-digit precision.
+  // Suppress only Excel's number-stored-as-text indicator, as SheetJS did.
+  const zip = await JSZip.loadAsync(await workbook.xlsx.writeBuffer());
+  for (let index = 0; index < source.SheetNames.length; index++) {
+    const path = `xl/worksheets/sheet${index + 1}.xml`;
+    const file = zip.file(path);
+    const ref = source.Sheets[source.SheetNames[index]]['!ref'];
+    if (!file || !ref) continue;
+    const xml = await file.async('string');
+    const ignored = `<ignoredErrors><ignoredError numberStoredAsText="1" sqref="${ref}"/></ignoredErrors>`;
+    zip.file(path, xml.replace(/(?=<(?:drawing|legacyDrawing|legacyDrawingHF|picture|oleObjects|controls|webPublishItems|tableParts|extLst)\b|<\/worksheet>)/, ignored));
+  }
+  return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
 }

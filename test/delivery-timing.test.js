@@ -38,7 +38,7 @@ test('distinguishes forecast, actual file date, contract and independent warning
   assert.ok(noReceipt.warnings.includes('Chưa xác định ngày nhận BTP'));
   assert.equal(deliveryTiming({ receiptDate: '2026-10-26', leadTime: '1 ngày' }).fileDate, null);
   const fifo = deliveryTiming({ receiptDate: '2026-10-26', leadTime: '1 ngày', receiptDateBasis: 'FIFO theo phiếu' });
-  assert.ok(fifo.warnings.includes('Ngày nhận phân bổ FIFO theo phiếu'));
+  assert.ok(!fifo.warnings.some(warning => warning.includes('FIFO')));
   const missingLead = deliveryTiming({ receiptDate: '2026-10-26' }, { leadTime: '1 ngày', dueDate: '2026-10-28' });
   assert.equal(missingLead.expectedDate, null);
   assert.equal(missingLead.contractDate, null);

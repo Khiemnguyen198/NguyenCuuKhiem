@@ -16,7 +16,7 @@ export function sortByUrgency(items) {
 export function exportFilename(now = new Date(), batch = null) {
   const ddmm = (iso) => `${iso.slice(8, 10)}${iso.slice(5, 7)}`;
   // One picked day of the week, or the whole week.
-  const week = !batch ? '' : batch.from === batch.to ? `_NGAY_${ddmm(batch.from)}` : `_TUAN_${ddmm(batch.from)}-${ddmm(batch.to)}`;
+  const week = !batch ? '' : batch.range ? `_TU_${batch.from.replaceAll('-', '')}_DEN_${batch.to.replaceAll('-', '')}` : batch.from === batch.to ? `_NGAY_${ddmm(batch.from)}` : `_TUAN_${ddmm(batch.from)}-${ddmm(batch.to)}`;
   return `TONG_HOP_GIAO_HANG${week}_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`;
 }
 
@@ -78,7 +78,8 @@ function thSheet({ booking, lots, sheetCheck }) {
   const pxiIssues = new Map((sheetCheck?.cells?.issues || []).filter((issue) => issue.type === 'return_before_pickup').map((issue) => [issue.date, issue]));
   const comments = [];
   const lotsByKey = new Map(lots.map((lot) => [lot.key, lot]));
-  const progress = PROGRESS_COLUMNS.filter((column) => booking.batch || !column[3]);
+  const progress = PROGRESS_COLUMNS.filter((column) => booking.batch || !column[3])
+    .map((column) => booking.batch?.range && column[0] === 'SL trong tuần' ? ['SL trong khoảng', ...column.slice(1)] : column);
   const labelColumn = TH_COLUMNS.length;
   const firstDay = labelColumn + 1;
   const progressStart = firstDay + days.length;
@@ -196,7 +197,7 @@ function canDoiSheet({ booking, lots }) {
   const firstDay = CAN_DOI_COLUMNS.length;
   const letter = (column) => XLSX.utils.encode_col(column);
   const formulaCell = (formula, value, format = '#,##0') => ({ t: 'n', v: value, f: formula, z: format });
-  const weekLabel = days.length ? `W${isoWeek(days[0].date)}` : 'W';
+  const weekLabel = booking.batch?.range ? 'Khoảng ngày' : days.length ? `W${isoWeek(days[0].date)}` : 'W';
   const header = [...CAN_DOI_COLUMNS.map(([title]) => (title === 'W' ? weekLabel : title)), ...days.map((day) => `Sum of ${viDay(day.date).slice(0, 5)}`)];
   const sum = (field) => ordered.reduce((total, group) => total + group[field], 0);
   const column = (name) => CAN_DOI_COLUMNS.findIndex(([title]) => title === name);

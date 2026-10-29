@@ -84,3 +84,5 @@ Always pull `master` before editing. Do not treat the GPT Sites deployment as th
 - Actual delivery dates come from the company delivery file; if unavailable, a uniquely matched dated NGÀY XUẤT in the receipt file may be used with source attribution. Text statuses and ambiguous or incomplete dates are never converted to delivery dates.
 
 - Warehouse delivery dates are joined from dated positive TOTAL XUẤT transactions in NHẬP XUẤT to TỔNG HỢP by exact PO-SLHĐ, product and colour; SLTL is checked against the booking ticket for dates, without changing quantity matching. Ambiguous or incomplete dates remain blank.
+
+- Export can use an inclusive PXC date range across weeks, using the selected daily allocations and retaining original booking dates. Numeric-looking identifiers stay as text, with Excel number-as-text warnings suppressed.

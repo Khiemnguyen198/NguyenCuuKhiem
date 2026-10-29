@@ -61,3 +61,14 @@ export function batchRows(rows, days, week) {
   if (!week) return rows;
   return rows.map((row) => batchRow(row, days, week)).filter(Boolean);
 }
+
+// A date range uses the same per-day allocations as a selected week, including
+// ranges that span weeks. Date boundaries are inclusive.
+export function rangeBatch(days, from, to) {
+  const valid = value => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
+  if (!valid(from) || !valid(to)) throw new Error('Chọn đầy đủ ngày bắt đầu và ngày kết thúc.');
+  if (from > to) throw new Error('Ngày bắt đầu phải trước hoặc bằng ngày kết thúc.');
+  const dayIndexes = days.flatMap((day, index) => day.date >= from && day.date <= to ? [index] : []);
+  if (!dayIndexes.length) throw new Error('Không có ngày kế hoạch PXC trong khoảng đã chọn.');
+  return { key: `range:${from}:${to}`, from, to, dayIndexes, range: true, label: `Từ ${shortDate(from)}/${from.slice(0, 4)} đến ${shortDate(to)}/${to.slice(0, 4)}` };
+}

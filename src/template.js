@@ -202,6 +202,14 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, ca
         <div class="batch-pickers"><label class="batch-picker"><span>Tuần booking</span><select data-batch-select aria-label="Chọn tuần booking"></select></label><label class="batch-picker batch-picker--day"><span>Ngày</span><select data-day-select aria-label="Chọn ngày trong tuần"></select></label></div>
         <button class="icon-button" data-close-check aria-label="Đóng"><i class="ph ph-x"></i></button>
       </header>
+      <div class="export-scope">
+        <label>Phạm vi xuất <select id="exportScope"><option value="current">Tuần / ngày đang chọn</option><option value="range">Từ ngày đến ngày</option></select></label>
+        <div class="export-scope__dates" id="exportDates" hidden>
+          <label>Từ ngày <input id="exportFrom" type="date"></label>
+          <label>Đến ngày <input id="exportTo" type="date"></label>
+          <small>Theo ngày kế hoạch PXC, tính cả ngày bắt đầu và kết thúc.</small>
+        </div>
+      </div>
       <div class="check-report" id="checkReport"></div>
       <footer class="settings-dialog__footer">
         <span class="change-reviewed" id="checkStatus"></span>
