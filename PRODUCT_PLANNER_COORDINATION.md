@@ -90,3 +90,5 @@ Always pull `master` before editing. Do not treat the GPT Sites deployment as th
 ## Release numbering
 
 - After v0.0.24 and v0.0.25, the next release is v0.1.1 (skip v0.0.26 and v0.1.0), as requested by the owner.
+
+- After v0.1.25, the next release is v0.2.1 (skip v0.1.26 and v0.2.0), as requested by the owner.
