@@ -33,7 +33,7 @@ const TH_COLUMNS = [
   ['LINE', (row) => row.line, 6], ['CUS', (row) => row.customer, 13], ['BRAND', (row) => row.brand, 14],
   ['REF', (row) => row.ref, 9], ['COLOR', (row) => row.color, 30], ['PO', (row) => row.po, 13], ['SS', (row) => row.season, 6],
   ['LINE QTY', (row) => numberCell(row.bookedLineQuantity ?? row.lineQuantity), 9],
-  [' INPUT ', (row) => dateCell(row.inputDate, 'd-mmm'), 8], [' OUTPUT ', (row) => dateCell(row.outputDate, 'd-mmm'), 8],
+  [' INPUT ', (row) => dateCell(row.inputDate, 'd-mmm'), 8], [' OUTPUT ', (row) => dateCell(row.bookingOutputDate ?? row.outputDate, 'd-mmm'), 8],
   [' MODEL CODE ', (row) => row.modelCode, 10], [' SỐ PHIẾU ', (row) => row.ticketNumber, 9],
   // SLHĐ TỔNG is the lot's total LINE QTY (same SỐ PHIẾU, or LINE + REF + COLOR + INPUT).
   [' SLHĐ TỔNG ', (row, lot) => numberCell(lot?.contract ?? row.contractQuantity ?? 0), 10], ['KẾ HOẠCH', (row) => row.planner, 9],
@@ -47,7 +47,10 @@ const PROGRESS_COLUMNS = [
   ['Màu', (row) => colorName(row.color), 26],
   ['SL trong tuần', (row) => numberCell(row.lineQuantity), 10, true],
   ['Nhận BTP', (row) => numberCell(row.receivedFifo ?? 0), 10],
-  ['Ngày nhận BTP', (row) => dateCell(row.receiptDate, 'dd/mm/yyyy'), 16],
+  ['Ngày nhận BTP (booking)', (row) => dateCell(row.inputDate, 'dd/mm/yyyy'), 18],
+  ['Ngày giao BTP (booking)', (row) => dateCell(row.bookingOutputDate ?? row.outputDate, 'dd/mm/yyyy'), 18],
+  ['Ngày nhận BTP thực tế', (row) => dateCell(row.receiptDate, 'dd/mm/yyyy'), 18],
+  ['Ngày giao BTP thực tế', (row) => dateCell(row.fileDeliveryDate, 'dd/mm/yyyy'), 18],
   ['Nguồn ngày nhận BTP', (row) => [row.receiptDateBasis || (row.receivedFifo > 0 ? 'Chưa xác định' : ''), row.receiptDate && row.inputDate && row.receiptDate < row.inputDate ? 'Ngày nhận trước INPUT: cần kiểm tra' : ''].filter(Boolean).join(' · '), 35],
   ['Đã in (giao)', (row) => numberCell(row.deliveredFifo ?? 0), 10],
   ['Còn thiếu', (row) => numberCell(row.remainingFifo ?? (row.bookedLineQuantity ?? row.lineQuantity)), 10],
@@ -275,8 +278,8 @@ export function buildIssuesWorkbook(sheetCheck, filename = '') {
 
 const DELIVERY_PLAN_COLUMNS = [
   ['MÃ HÀNG', 14], ['MÀU', 26], ['PO', 15], ['SS', 8], ['SLHĐ', 10], ['SLHĐ TỔNG', 12],
-  ['SL BTP NHẬN', 13], ['LEADTIME', 10], ['NGÀY NHẬN', 16], ['NGÀY GIAO HỢP ĐỒNG', 18],
-  ['NGÀY GIAO THỰC TẾ', 18], ['NGÀY GIAO DỰ KIẾN', 20], ['CẢNH BÁO', 48]
+  ['SL BTP NHẬN', 13], ['LEADTIME', 10], ['NGÀY NHẬN BTP (BOOKING)', 20], ['NGÀY GIAO BTP (BOOKING)', 20],
+  ['NGÀY NHẬN BTP THỰC TẾ', 20], ['NGÀY GIAO BTP THỰC TẾ', 20], ['NGÀY GIAO DỰ KIẾN', 20], ['CẢNH BÁO', 48]
 ];
 const actualDateStyle = { fill: { fgColor: { rgb: 'FFF2CC' } }, font: { bold: true, color: { rgb: '7F6000' } } };
 const lateDateStyle = { fill: { fgColor: { rgb: 'F4CCCC' } }, font: { bold: true, color: { rgb: '9C0006' } } };
@@ -296,8 +299,8 @@ function deliveryPlanSheet({ booking, lots = [] }) {
     table.push([
       row.ref || '', colorName(row.color) || row.color || '', row.po || '', row.season || '',
       numberCell(row.lineQuantity), numberCell(lot?.contract ?? row.contractQuantity ?? 0),
-      numberCell(row.receivedFifo ?? 0), row.leadTime || '', dateCell(timing.receiptDate, 'dd/mm/yyyy'),
-      dateCell(timing.contractDate, 'dd/mm/yyyy'), dateCell(timing.fileDate, 'dd/mm/yyyy'),
+      numberCell(row.receivedFifo ?? 0), row.leadTime || '', dateCell(timing.bookingReceiptDate, 'dd/mm/yyyy'),
+      dateCell(timing.contractDate, 'dd/mm/yyyy'), dateCell(timing.receiptDate, 'dd/mm/yyyy'), dateCell(timing.fileDate, 'dd/mm/yyyy'),
       dateCell(timing.expectedDate, 'dd/mm/yyyy'), warning
     ]);
   });
@@ -307,8 +310,8 @@ function deliveryPlanSheet({ booking, lots = [] }) {
   sheet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(0, table.length - 1), c: DELIVERY_PLAN_COLUMNS.length - 1 } }) };
   ordered.forEach(({ row, lot }, index) => {
     const timing = deliveryTiming(row, lot);
-    const fileAddress = cellAddress(index + 1, 10);
-    const expectedAddress = cellAddress(index + 1, 11);
+    const fileAddress = cellAddress(index + 1, 11);
+    const expectedAddress = cellAddress(index + 1, 12);
     if (sheet[expectedAddress]) sheet[expectedAddress].s = timing.expectedLate ? lateDateStyle : actualDateStyle;
     if (sheet[fileAddress]) sheet[fileAddress].s = timing.fileLate || timing.mismatched ? lateDateStyle : actualDateStyle;
   });

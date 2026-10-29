@@ -46,6 +46,7 @@ export function batchRow(row, days, week) {
   return {
     ...row,
     bookedLineQuantity: row.bookedLineQuantity ?? row.lineQuantity,
+    bookingOutputDate: row.bookingOutputDate ?? row.outputDate,
     lineQuantity: Math.round(quantity),
     outputDate: returns.at(-1) || row.outputDate,
     allocations: Object.fromEntries(entries),

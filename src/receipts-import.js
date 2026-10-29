@@ -14,6 +14,7 @@ const text = (value) => String(value ?? '').trim();
 // Headers are matched without accents; the first column whose header matches wins.
 const COLUMNS = {
   date: ['NGAY NHAN'],
+  shippedDate: ['NGAY XUAT'],
   customer: ['KHACH HANG'],
   model: ['MA HANG'],
   color: ['MAU'],
@@ -60,6 +61,10 @@ export function readReceiptsWorkbook(buffer) {
   throw new Error('Không tìm thấy sheet có cột MÃ HÀNG và TOTAL / TỔNG NHẬN (sheet DATA) trong file nhận.');
 }
 
+function optionalDate(value) {
+  try { return toIsoDate(value); } catch { return null; }
+}
+
 export function readReceiptsSheet(sheet) {
   const table = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true, blankrows: true });
   const headerIndex = findHeader(table);
@@ -70,6 +75,8 @@ export function readReceiptsSheet(sheet) {
     .filter((cells) => text(cell(cells, 'model')) && (toNumber(cell(cells, 'received')) || toNumber(cell(cells, 'shipped'))))
     .map((cells) => ({
       date: toIsoDate(cell(cells, 'date')),
+      // The source sometimes uses status text such as OK in NGÀY XUẤT.
+      shippedDate: optionalDate(cell(cells, 'shippedDate')),
       customer: text(cell(cells, 'customer')),
       model: text(cell(cells, 'model')),
       color: text(cell(cells, 'color')),
@@ -91,7 +98,7 @@ export function compactReceiptLines(lines) {
   const groups = new Map();
   for (const line of lines) {
     const key = [line.model, line.color, line.season, line.po].map((value) => String(value ?? '').trim().toUpperCase()).join('|');
-    const group = groups.get(key) || { ...line, received: 0, shipped: 0, receipts: 0, firstDate: null, date: null, lastReceivedDate: null, receiptDates: [], undatedReceived: false };
+    const group = groups.get(key) || { ...line, received: 0, shipped: 0, receipts: 0, firstDate: null, date: null, lastReceivedDate: null, receiptDates: [], undatedReceived: false, lastShippedDate: null, undatedShipped: false };
     group.received += line.received || 0;
     group.shipped += line.shipped || 0;
     group.receipts += line.receipts ?? 1;
@@ -104,6 +111,11 @@ export function compactReceiptLines(lines) {
     // date with actual incoming BTP when the browser compacts the log.
     const receivedDate = line.lastReceivedDate || ((line.receipts ?? 1) === 1 && line.received > 0 ? line.date : null);
     if (isIsoDate(receivedDate) && (!group.lastReceivedDate || receivedDate > group.lastReceivedDate)) group.lastReceivedDate = receivedDate;
+    if (line.shipped > 0) {
+      const shippedDate = line.lastShippedDate || ((line.receipts ?? 1) === 1 ? line.shippedDate : null);
+      if (line.undatedShipped || !isIsoDate(shippedDate)) group.undatedShipped = true;
+      else if (!group.lastShippedDate || shippedDate > group.lastShippedDate) group.lastShippedDate = shippedDate;
+    }
     if (line.received > 0) {
       if (Array.isArray(line.receiptDates)) {
         const dated = line.receiptDates.filter((item) => isIsoDate(item.date) && Number.isFinite(item.received) && item.received > 0);

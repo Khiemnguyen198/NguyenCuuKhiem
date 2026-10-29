@@ -50,7 +50,7 @@ test('screen and serialized delivery workbook show the same separate dates and w
   const lot = { key: 'lot', status: 'waiting', contract: 10, model: 'R', color: row.color, dueDate: row.outputDate, leadTime: row.leadTime, received: 10, rows: [row] };
   const html = renderDeliveryPlanTable([lot]);
   assert.match(html, /Ngày nhận BTP/);
-  assert.match(html, /Ngày giao thực tế \(file\)/);
+  assert.match(html, /Ngày giao BTP thực tế/);
   assert.match(html, /Ngày giao dự kiến/);
   assert.match(html, /26\/10\/2026/);
   assert.match(html, /30\/10\/2026/);
@@ -59,14 +59,26 @@ test('screen and serialized delivery workbook show the same separate dates and w
   const book = buildExportWorkbook({ booking: { rows: [row], days: [] }, lots: [lot] });
   const bytes = XLSX.write(book, { type: 'buffer', bookType: 'xlsx' });
   const sheet = XLSX.read(bytes, { type: 'buffer', cellDates: false }).Sheets['KE HOACH GIAO HANG'];
-  assert.deepEqual(['I1','J1','K1','L1','M1'].map((key) => sheet[key].v), ['NGÀY NHẬN','NGÀY GIAO HỢP ĐỒNG','NGÀY GIAO THỰC TẾ','NGÀY GIAO DỰ KIẾN','CẢNH BÁO']);
+  assert.deepEqual(['I1','J1','K1','L1','M1','N1'].map((key) => sheet[key].v), ['NGÀY NHẬN BTP (BOOKING)','NGÀY GIAO BTP (BOOKING)','NGÀY NHẬN BTP THỰC TẾ','NGÀY GIAO BTP THỰC TẾ','NGÀY GIAO DỰ KIẾN','CẢNH BÁO']);
   const excelSerial = (iso) => (Date.parse(`${iso}T00:00:00Z`) - Date.UTC(1899,11,30)) / 86400000;
-  assert.deepEqual(['I2','J2','K2','L2'].map((key) => sheet[key].v), ['2026-10-26','2026-10-29','2026-10-30','2026-10-28'].map(excelSerial));
-  assert.match(sheet.M2.v, /Ngày file giao khác ngày dự kiến/);
-  assert.match(sheet.M2.v, /Ngày file giao trễ hạn hợp đồng/);
+  assert.deepEqual(['I2','J2','K2','L2','M2'].map((key) => sheet[key].v), ['2026-10-24','2026-10-29','2026-10-26','2026-10-30','2026-10-28'].map(excelSerial));
+  assert.match(sheet.N2.v, /Ngày file giao khác ngày dự kiến/);
+  assert.match(sheet.N2.v, /Ngày file giao trễ hạn hợp đồng/);
 });
 
 test('warns if a matched receipt precedes the booking INPUT date', () => {
   const result = deliveryTiming({receiptDate:'2026-06-19',inputDate:'2026-10-20',leadTime:'1 ngày',receiptDateBasis:'FIFO theo mã/mùa'});
   assert.ok(result.warnings.some(message => message.includes('trước INPUT')));
+});
+
+test('weekly export keeps the original booking INPUT and OUTPUT beside actual dates', async () => {
+  const {batchRow} = await import('../src/batches.js');
+  const row = {line:'1',ref:'R',po:'P',inputDate:'2026-10-20',outputDate:'2026-11-09',receiptDate:'2026-10-30',fileDeliveryDate:'2026-11-04',lineQuantity:10,printCount:1,leadTime:'1 ngày',allocations:{0:10},dayFifo:{0:{received:10,delivered:10,good:10}}};
+  const batch = batchRow(row,[{date:'2026-10-26',returnDate:'2026-10-27'}],{dayIndexes:[0]});
+  assert.equal(batch.outputDate,'2026-10-27');
+  const workbook=buildExportWorkbook({booking:{rows:[batch],days:[]},lots:[]});
+  const sheet=workbook.Sheets['KE HOACH GIAO HANG'];
+  const serial = date => (Date.parse(date+'T00:00:00Z')-Date.UTC(1899,11,30))/86400000;
+  assert.deepEqual(['I2','J2','K2','L2'].map(key=>sheet[key].v),['2026-10-20','2026-11-09','2026-10-30','2026-11-04'].map(serial));
+  assert.equal(workbook.Sheets.TH.J6.v,serial('2026-11-09'));
 });

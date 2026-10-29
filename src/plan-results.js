@@ -205,15 +205,16 @@ export function renderDeliveryPlanTable(orders) {
       <td>${number(order.contract)}</td>
       <td>${number(row.receivedFifo ?? order.received)}</td>
       <td>${escapeHtml(row.leadTime || order.leadTime || '—')}</td>
-      <td>${formatDate(timing.receiptDate)}</td>
+      <td>${formatDate(timing.bookingReceiptDate)}</td>
       <td>${formatDate(timing.contractDate)}</td>
+      <td>${formatDate(timing.receiptDate)}</td>
       <td class="${fileClass}">${formatDate(timing.fileDate)}</td>
       <td class="${expectedClass}">${formatDate(timing.expectedDate)}</td>
       <td><span class="result-pill${timing.warnings.length ? ' result-pill--warn' : ''}">${escapeHtml(warning)}</span></td>
     </tr>`;
-  }).join('') || empty(13, 'Không có dòng booking trong phạm vi đã chọn.');
+  }).join('') || empty(14, 'Không có dòng booking trong phạm vi đã chọn.');
   return `<div class="plan-table-scroll plan-delivery-table-scroll"><table class="delivery-table plan-table plan-delivery-table">
-    <thead><tr><th class="th-left">Mã hàng</th><th class="th-left">Màu</th><th class="th-left">PO</th><th>SS</th><th>SLHĐ</th><th>SLHĐ tổng</th><th>SL BTP nhận</th><th>Leadtime</th><th>Ngày nhận BTP</th><th>Ngày giao hợp đồng</th><th>Ngày giao thực tế (file)</th><th>Ngày giao dự kiến</th><th>Cảnh báo</th></tr></thead>
+    <thead><tr><th class="th-left">Mã hàng</th><th class="th-left">Màu</th><th class="th-left">PO</th><th>SS</th><th>SLHĐ</th><th>SLHĐ tổng</th><th>SL BTP nhận</th><th>Leadtime</th><th>Ngày nhận BTP (booking)</th><th>Ngày giao BTP (booking)</th><th>Ngày nhận BTP thực tế</th><th>Ngày giao BTP thực tế</th><th>Ngày giao dự kiến</th><th>Cảnh báo</th></tr></thead>
     <tbody>${body}</tbody>
   </table></div>`;
 }

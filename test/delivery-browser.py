@@ -47,7 +47,7 @@ const wb=XLSX.read(readFileSync(process.argv[1]),{type:'buffer',cellDates:false,
 const sheet=wb.Sheets['KE HOACH GIAO HANG'];
 const rows=XLSX.utils.sheet_to_json(sheet,{header:1,defval:null,raw:true});
 const idx=name=>{let i=rows[0].indexOf(name);if(i<0)throw new Error('Missing column '+name+': '+rows[0].join('|'));return i;};
-const names=['PO','NGÀY NHẬN','NGÀY GIAO HỢP ĐỒNG','NGÀY GIAO THỰC TẾ','NGÀY GIAO DỰ KIẾN','CẢNH BÁO'];
+const names=['PO','NGÀY NHẬN BTP (BOOKING)','NGÀY GIAO BTP (BOOKING)','NGÀY NHẬN BTP THỰC TẾ','NGÀY GIAO BTP THỰC TẾ','NGÀY GIAO DỰ KIẾN','CẢNH BÁO'];
 const result=rows.slice(1).filter(row=>row[2]).map(row=>Object.fromEntries(names.map(name=>[name,row[idx(name)]])));
 const converted=result.map(row=>Object.fromEntries(Object.entries(row).map(([k,v])=>[k,v instanceof Date ? v.toISOString().slice(0,10):v])));
 console.log(JSON.stringify(converted));
@@ -68,10 +68,10 @@ def assert_cells(page, po, receipt, file_date, expected):
     row=data_row(page,po)
     expect(row).to_have_count(1)
     cells=row.locator('td')
-    expect(cells.nth(8)).to_have_text(receipt)
-    expect(cells.nth(10)).to_have_text(file_date)
-    expect(cells.nth(11)).to_have_text(expected)
-    return cells.nth(12).inner_text()
+    expect(cells.nth(10)).to_have_text(receipt)
+    expect(cells.nth(11)).to_have_text(file_date)
+    expect(cells.nth(12)).to_have_text(expected)
+    return cells.nth(13).inner_text()
 
 
 def check_mode(browser, url, directory, label):
@@ -95,13 +95,15 @@ def check_mode(browser, url, directory, label):
     download_info.value.save_as(output)
     serialized=subprocess.run(['node','--input-type=module','-e',CHECK_EXPORT,str(output)],cwd=ROOT,check=True,capture_output=True,text=True,env={**os.environ, 'TZ':'UTC'})
     rows={row['PO']:row for row in json.loads(serialized.stdout)}
-    assert rows['PO-1']['NGÀY NHẬN']=='2026-10-30',rows
-    assert rows['PO-1']['NGÀY GIAO THỰC TẾ']=='2026-11-04',rows
+    assert rows['PO-1']['NGÀY NHẬN BTP (BOOKING)']=='2026-10-01',rows
+    assert rows['PO-1']['NGÀY GIAO BTP (BOOKING)']=='2026-11-09',rows
+    assert rows['PO-1']['NGÀY NHẬN BTP THỰC TẾ']=='2026-10-30',rows
+    assert rows['PO-1']['NGÀY GIAO BTP THỰC TẾ']=='2026-11-04',rows
     assert rows['PO-1']['NGÀY GIAO DỰ KIẾN']=='2026-11-02',rows
     assert 'khác' in rows['PO-1']['CẢNH BÁO'].lower(),rows
     assert rows['PO-2']['NGÀY GIAO DỰ KIẾN']=='2026-11-04',rows
     assert 'khác' not in rows['PO-2']['CẢNH BÁO'].lower(),rows
-    assert rows['PO-3']['NGÀY NHẬN'] is None and rows['PO-3']['NGÀY GIAO DỰ KIẾN'] is None,rows
+    assert rows['PO-3']['NGÀY NHẬN BTP THỰC TẾ'] is None and rows['PO-3']['NGÀY GIAO DỰ KIẾN'] is None,rows
     assert not errors,errors
     context.close()
     print(f'PASS {label}: source files, per-PO dates and warnings, downloaded workbook')

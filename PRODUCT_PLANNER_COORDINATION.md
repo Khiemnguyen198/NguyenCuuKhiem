@@ -79,3 +79,6 @@ Always pull `master` before editing. Do not treat the GPT Sites deployment as th
 - Show the calculated expected date separately from the delivery-file date and the booking contract deadline; flag differences and late dates. A forecast is not proof that a delivery occurred.
 - Only attach receipt/delivery dates to a PO when source identification and allocation support it; leave ambiguous dates blank with a warning. Never substitute booking INPUT for an actual BTP receipt date.
 - The TH contract export includes BTP receipt date and matching provenance next to received quantity. Dated, unambiguously pooled receipt events follow the same product/season FIFO as quantities; unknown or incomplete dates remain empty.
+
+- The main delivery plan and TH export display four distinct columns: booking INPUT and OUTPUT, actual BTP receipt, and actual BTP delivery from the company files. Preserve the original booking OUTPUT even in a weekly/day selection; the calculated forecast remains separately labelled.
+- Actual delivery dates come from the company delivery file; if unavailable, a uniquely matched dated NGÀY XUẤT in the receipt file may be used with source attribution. Text statuses and ambiguous or incomplete dates are never converted to delivery dates.

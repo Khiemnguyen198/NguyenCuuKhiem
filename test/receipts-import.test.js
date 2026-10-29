@@ -36,3 +36,13 @@ test('reads the real layout where both totals are labelled TOTAL', () => {
   const [line] = readReceiptsSheet(XLSX.utils.aoa_to_sheet(rows));
   assert.deepEqual([line.model, line.po, line.received, line.shipped, line.date], ['335516', '73576', 1334, 1300, '2026-10-27']);
 });
+
+test('reads shipment dates, but treats status text as an unknown date', () => {
+  const header = ['NGÀY NHẬN','MÃ HÀNG','MÀU','PO','TỔNG NHẬN','NGÀY XUẤT','TỔNG XUẤT'];
+  const lines = readReceiptsSheet(XLSX.utils.aoa_to_sheet([header,[46321,'A','BLUE','111',10,46323,10],[46321,'B','BLACK','222',10,'OK',10]]));
+  assert.equal(lines[0].shippedDate,'2026-10-28');
+  assert.equal(lines[1].shippedDate,null);
+  const compact = compactReceiptLines(lines);
+  assert.equal(compact[0].lastShippedDate,'2026-10-28');
+  assert.equal(compact[1].undatedShipped,true);
+});

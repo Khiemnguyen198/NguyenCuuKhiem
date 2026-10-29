@@ -47,7 +47,8 @@ export function deliveryTiming(row, order = {}) {
   const leadTime = row.leadTime || '';
   const expectedDate = expectedDeliveryDate(receiptDate, leadTime);
   const fileDate = validDate(row.fileDeliveryDate);
-  const contractDate = validDate(row.outputDate || (row === order ? row.dueDate : null));
+  const bookingReceiptDate = validDate(row.inputDate);
+  const contractDate = validDate(row.bookingOutputDate ?? row.outputDate ?? (row === order ? row.dueDate : null));
   const mismatched = Boolean(fileDate && expectedDate && fileDate !== expectedDate);
   const expectedLate = Boolean(expectedDate && contractDate && expectedDate > contractDate);
   const fileLate = Boolean(fileDate && contractDate && fileDate > contractDate);
@@ -58,8 +59,9 @@ export function deliveryTiming(row, order = {}) {
   if (receiptDate && row.receiptDateBasis?.startsWith('FIFO')) warnings.push(`Ngày nhận phân bổ ${row.receiptDateBasis}`);
   if (receiptDate && validDate(row.inputDate) && receiptDate < row.inputDate) warnings.push('Ngày nhận trước INPUT booking: cần kiểm tra');
   if (!fileDate) warnings.push('Chưa có ngày giao theo file');
+  else if (row.fileDeliveryDateBasis === 'Ngày xuất file nhận') warnings.push('Ngày giao từ cột NGÀY XUẤT file nhận');
   if (mismatched) warnings.push('Ngày file giao khác ngày dự kiến');
   if (expectedLate) warnings.push('Dự kiến trễ hạn hợp đồng');
   if (fileLate) warnings.push('Ngày file giao trễ hạn hợp đồng');
-  return { receiptDate, expectedDate, fileDate, contractDate, mismatched, expectedLate, fileLate, warnings };
+  return { bookingReceiptDate, receiptDate, expectedDate, fileDate, contractDate, mismatched, expectedLate, fileLate, warnings };
 }

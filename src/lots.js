@@ -99,6 +99,7 @@ function assignRowDates(lots, receiptLines, deliveryLines) {
       row.receiptDate = null;
       row.receiptDateBasis = null;
       row.fileDeliveryDate = null;
+      row.fileDeliveryDateBasis = null;
       const key = productOf(row.ref, modelCodeOf(row.color, row.modelCode));
       const rows = byProduct.get(key) || [];
       rows.push(row);
@@ -256,6 +257,28 @@ function assignRowDates(lots, receiptLines, deliveryLines) {
     }
     if (candidates.length !== 1) continue;
     candidates[0].fileDeliveryDate = latest(candidates[0].fileDeliveryDate, line.actualDeliveryDate);
+    candidates[0].fileDeliveryDateBasis = 'Ngày giao file công ty';
+  }
+  // File giao has priority. Only use NGÀY XUẤT from the receiving log when
+  // every shipment date is known and its PO/ticket identifies exactly one row.
+  const shipments = new Map();
+  for (const line of receiptLines) {
+    if (!(Number(line.shipped) > 0) || !hasTicket(line.po)) continue;
+    const token = up(line.po);
+    const candidates = compatibleRows(line).filter(row => up(row.po) === token || (hasTicket(row.ticketNumber) && up(row.ticketNumber) === token));
+    if (candidates.length !== 1) continue;
+    const row = candidates[0];
+    const entry = shipments.get(row) || { date:null, complete:true };
+    const date = line.lastShippedDate || ((line.receipts ?? 1) === 1 ? line.shippedDate : null);
+    if (line.undatedShipped || !validDate(date)) entry.complete = false;
+    else entry.date = latest(entry.date, date);
+    shipments.set(row, entry);
+  }
+  for (const [row, entry] of shipments) {
+    if (!row.fileDeliveryDate && entry.complete && entry.date) {
+      row.fileDeliveryDate = entry.date;
+      row.fileDeliveryDateBasis = 'Ngày xuất file nhận';
+    }
   }
 }
 

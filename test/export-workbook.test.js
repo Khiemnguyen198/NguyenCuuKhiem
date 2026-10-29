@@ -19,7 +19,7 @@ test('exports the booking in the customer TH layout', () => {
   const workbook = buildExportWorkbook({ booking, lots: items });
   assert.deepEqual(workbook.SheetNames, ['KE HOACH GIAO HANG', 'TH', 'CAN DOI']);
   const deliveryPlan = XLSX.utils.sheet_to_json(workbook.Sheets['KE HOACH GIAO HANG'], { header: 1, defval: null, raw: true });
-  assert.deepEqual(deliveryPlan[0].slice(0, 11), ['MÃ HÀNG', 'MÀU', 'PO', 'SS', 'SLHĐ', 'SLHĐ TỔNG', 'SL BTP NHẬN', 'LEADTIME', 'NGÀY NHẬN', 'NGÀY GIAO HỢP ĐỒNG', 'NGÀY GIAO THỰC TẾ']);
+  assert.deepEqual(deliveryPlan[0].slice(0, 11), ['MÃ HÀNG', 'MÀU', 'PO', 'SS', 'SLHĐ', 'SLHĐ TỔNG', 'SL BTP NHẬN', 'LEADTIME', 'NGÀY NHẬN BTP (BOOKING)', 'NGÀY GIAO BTP (BOOKING)', 'NGÀY NHẬN BTP THỰC TẾ']);
   // SheetJS 0.20 converts date-formatted numbers to Date in sheet_to_json,
   // even with raw:true. Assert the serialized Excel cell contract directly.
   const contractDate = workbook.Sheets['KE HOACH GIAO HANG'].J2;
@@ -90,7 +90,7 @@ test('contract TH export includes the matched BTP receipt date and its provenanc
   const book = buildExportWorkbook({ booking:{ rows, days:[] }, lots:items });
   const sheet = XLSX.read(XLSX.write(book,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true}).Sheets.TH;
   const header = XLSX.utils.sheet_to_json(sheet,{header:1,range:4,defval:null})[0];
-  const column = header.indexOf('Ngày nhận BTP');
+  const column = header.indexOf('Ngày nhận BTP thực tế');
   const basis = header.indexOf('Nguồn ngày nhận BTP');
   assert.ok(column > 0 && basis > 0);
   const cell = sheet[XLSX.utils.encode_cell({r:5,c:column})];

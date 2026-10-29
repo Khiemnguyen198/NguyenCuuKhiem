@@ -285,3 +285,15 @@ test('matches a unique receipt ticket and REF when the receipt colour is a short
   summarizeLots({bookingRows:ambiguous,receiptLines});
   assert.deepEqual(ambiguous.map(r=>r.receiptDate),[null,null]);
 });
+
+test('uses a uniquely matched shipment date from the receiving file only when reliable', () => {
+  const makeRows = () => [row('PO-A', 10, '2026-11-05', { ticketNumber:'111' })];
+  const r = {model:'353234',color:'9046670 1P BEA',season:'SS27',po:'111',received:10,date:'2026-10-26',shipped:10,shippedDate:'2026-10-28'};
+  const rows=makeRows();summarizeLots({bookingRows:rows,receiptLines:[r]});
+  assert.equal(rows[0].fileDeliveryDate,'2026-10-28');
+  assert.equal(rows[0].fileDeliveryDateBasis,'Ngày xuất file nhận');
+  const missing=makeRows();summarizeLots({bookingRows:missing,receiptLines:[r,{...r,received:0,shipped:1,shippedDate:null}]});
+  assert.equal(missing[0].fileDeliveryDate,null);
+  const primary=makeRows();summarizeLots({bookingRows:primary,receiptLines:[r],deliveryLines:[delivery({po:'PO-A',ticket:'111',delivered:10,good:10,actualDeliveryDate:'2026-10-30'})]});
+  assert.equal(primary[0].fileDeliveryDate,'2026-10-30');
+});
