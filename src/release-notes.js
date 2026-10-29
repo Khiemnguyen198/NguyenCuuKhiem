@@ -2,6 +2,10 @@ import { escapeHtml } from './format.js';
 
 // Bundle notes with their version so they remain accurate and available offline.
 const RELEASE_NOTES = {
+  '0.0.18': [
+    'Trình bày file Excel rõ ràng hơn, giữ công thức, bộ lọc và bốn cột ngày nhận/giao BTP.',
+    'Xóa chức năng phiếu giao nhận BTP.'
+  ],
   '0.0.6': [
     'Sửa lỗi logo bị cắt ở đầu thanh bên.',
     'Căn giữa logo khi thanh bên thu gọn.'
