@@ -108,7 +108,13 @@ function assignRowDates(lots, receiptLines, deliveryLines) {
   const compatibleRows = (line) => {
     const key = productOf(line.model, modelCodeOf(line.color));
     const season = resolveSeason(key, line.season);
-    return season == null ? [] : (byProduct.get(key) || []).filter((row) => up(row.season) === season);
+    if (season != null) return (byProduct.get(key) || []).filter((row) => up(row.season) === season);
+    // Some receipt sheets contain a short colour name (e.g. BK), not the
+    // booking's seven-digit model code. A unique ticket plus matching REF is
+    // sufficient to identify the lot; never override an explicit model code.
+    if (/^\s*\d{7}/.test(String(line.color ?? '')) || !hasTicket(line.po)) return [];
+    const matches = lots.filter(lot => hasTicket(lot.ticket) && up(lot.ticket) === up(line.po) && up(lot.ref) === up(line.model));
+    return matches.length === 1 ? matches[0].rows : [];
   };
   const latest = (previous, candidate) => !previous || candidate > previous ? candidate : previous;
   const validDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? ''));
@@ -148,8 +154,7 @@ function assignRowDates(lots, receiptLines, deliveryLines) {
   for (const group of shared.values()) {
     const first = group.lines[0];
     const token = up(first.po);
-    const productRows = byProduct.get(productOf(first.model, modelCodeOf(first.color))) || [];
-    const candidates = productRows.filter((row) => hasTicket(row.ticketNumber) && up(row.ticketNumber) === token);
+    const candidates = compatibleRows(first).filter((row) => hasTicket(row.ticketNumber) && up(row.ticketNumber) === token);
     if (candidates.length < 2 || new Set(candidates.map((row) => row.lotKey)).size !== 1) continue;
     if (group.lines.some((line) => {
       const matching = compatibleRows(line).filter((row) => hasTicket(row.ticketNumber) && up(row.ticketNumber) === token);

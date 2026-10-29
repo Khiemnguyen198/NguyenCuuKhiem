@@ -65,3 +65,8 @@ test('screen and serialized delivery workbook show the same separate dates and w
   assert.match(sheet.M2.v, /Ngày file giao khác ngày dự kiến/);
   assert.match(sheet.M2.v, /Ngày file giao trễ hạn hợp đồng/);
 });
+
+test('warns if a matched receipt precedes the booking INPUT date', () => {
+  const result = deliveryTiming({receiptDate:'2026-06-19',inputDate:'2026-10-20',leadTime:'1 ngày',receiptDateBasis:'FIFO theo mã/mùa'});
+  assert.ok(result.warnings.some(message => message.includes('trước INPUT')));
+});

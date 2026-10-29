@@ -269,3 +269,19 @@ test('dated receipts without a ticket follow the same product FIFO as allocated 
   summarizeLots({ bookingRows: rows, receiptLines: [receipts[0], { ...receipts[1], date: null }] });
   assert.deepEqual(rows.map(r => r.receiptDate), [null, null]);
 });
+
+test('matches a unique receipt ticket and REF when the receipt colour is a short code', () => {
+  const rows = [row('PO-A', 40, '2026-11-05', { ticketNumber: '111' }), row('PO-B', 60, '2026-11-06', { ticketNumber: '111' })];
+  const receiptLines = [
+    { model:'353234', color:'BK', season:'', po:'111', received:50, date:'2026-10-26' },
+    { model:'353234', color:'BK', season:'', po:'111', received:50, date:'2026-10-28' }
+  ];
+  summarizeLots({ bookingRows: rows, receiptLines });
+  assert.deepEqual(rows.map(r=>r.receiptDate), ['2026-10-26','2026-10-28']);
+  const wrong = [row('PO-A', 40, '2026-11-05', { ticketNumber:'111' })];
+  summarizeLots({ bookingRows:wrong, receiptLines:[{...receiptLines[0],color:'9999999 BLUE'}] });
+  assert.equal(wrong[0].receiptDate, null);
+  const ambiguous = [row('PO-A',40,'2026-11-05',{ticketNumber:'111'}),row('PO-B',40,'2026-11-06',{ticketNumber:'111',color:'9999999 BLUE',modelCode:'9999999'})];
+  summarizeLots({bookingRows:ambiguous,receiptLines});
+  assert.deepEqual(ambiguous.map(r=>r.receiptDate),[null,null]);
+});
