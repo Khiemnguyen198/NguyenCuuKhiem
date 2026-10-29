@@ -5,3 +5,6 @@ dist/
 .DS_Store
 dist-desktop/
 release/
+
+__pycache__/
+*.pyc

@@ -9,16 +9,16 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, ca
     <aside class="sidebar">
       <div class="brand"><img src="/inkava-logo.png" alt="Inkava" /></div>
       <nav class="nav" aria-label="Điều hướng chính">
-        <button class="nav__item nav__item--active" data-page="Tổng quan"><i class="ph ph-house"></i><span>Tổng quan</span></button>
-        <button class="nav__item" data-page="Mã hàng"><i class="ph ph-list-magnifying-glass"></i><span>Theo mã hàng</span></button>
-        <button class="nav__item" data-page="Kế hoạch"><i class="ph ph-calendar-dots"></i><span>Kế hoạch</span></button>
+        <button class="nav__item nav__item--active" data-page="Tổng quan" aria-label="Tổng quan"><i class="ph ph-house"></i><span>Tổng quan</span></button>
+        <button class="nav__item" data-page="Mã hàng" aria-label="Theo mã hàng"><i class="ph ph-list-magnifying-glass"></i><span>Theo mã hàng</span></button>
+        <button class="nav__item" data-page="Kế hoạch" aria-label="Kế hoạch"><i class="ph ph-calendar-dots"></i><span>Kế hoạch</span></button>
       </nav>
       <div class="app-update">
         ${renderReleaseNotes(appVersion)}
         <span id="appVersion">Phiên bản v${appVersion}</span>
         <button type="button" class="app-update__button" id="updateButton" title="Kiểm tra và cài phiên bản mới" hidden><i class="ph ph-arrow-circle-up"></i><span>Cập nhật</span></button>
       </div>
-      <div class="sidebar__foot"><span class="status-dot"></span>${isStaticPages ? 'Lưu trên trình duyệt' : 'SQLite đang hoạt động'}</div>
+      <div class="sidebar__foot"><span class="status-dot"></span><span id="storageStatus">${isStaticPages ? 'Lưu trên trình duyệt' : 'Đang kết nối SQLite…'}</span></div>
     </aside>
 
     <main class="main">
@@ -36,6 +36,8 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, ca
         </div>
       </header>
 
+      <p id="storageNotice" class="storage-notice" role="status" hidden></p>
+      <div id="pendingBooking" class="pending-booking" role="alert" hidden></div>
       <section class="plan-list-view" id="planListView" hidden>
         <section class="delivery-summary plan-results">
           <div class="delivery-summary__heading">
@@ -165,7 +167,7 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, ca
         <div class="workspace__main">
           <section class="file-strip" aria-live="polite">
             <div class="file-icon"><i class="ph ph-file-xls"></i></div>
-            <div class="file-strip__copy"><strong id="filename">Đang tải dữ liệu…</strong><span id="fileMeta">Kết nối SQLite</span></div>
+            <div class="file-strip__copy"><strong id="filename">Đang tải dữ liệu…</strong><span id="fileMeta">${isStaticPages ? 'Đọc trên trình duyệt' : 'Đang kết nối SQLite…'}</span></div>
             <div class="valid-state" id="dataCheckState"><i class="ph ph-brain"></i><div><strong id="dataCheckTitle">AI local sẵn sàng</strong><span id="dataCheckMeta">Kiểm tra trực tiếp trên thiết bị</span></div></div>
           </section>
 
@@ -188,7 +190,7 @@ export function appTemplate({ isStaticPages, dayLabel, weekLabel, appVersion, ca
         <aside class="issues-panel ai-panel">
           <div class="issues-panel__title"><div><p>AI LOCAL</p><h2>Kiểm tra file</h2></div><span id="aiScore">—</span></div>
           <div class="ai-privacy"><i class="ph ph-shield-check"></i><span>Chạy cục bộ · Không gửi dữ liệu ra ngoài</span></div>
-          <div class="ai-findings" id="aiFindings"><div class="ai-empty"><i class="ph ph-brain"></i><strong>Chọn file để kiểm tra</strong><span>AI local sẽ rà soát dữ liệu đã lưu trong SQLite.</span></div></div>
+          <div class="ai-findings" id="aiFindings"><div class="ai-empty"><i class="ph ph-brain"></i><strong>Chọn file để kiểm tra</strong><span>AI local rà soát dữ liệu trên thiết bị đang dùng.</span></div></div>
           <button class="ai-refresh" id="runAiCheck"><i class="ph ph-arrows-clockwise"></i>Kiểm tra lại</button>
         </aside>
       </div>

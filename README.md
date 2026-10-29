@@ -1,6 +1,6 @@
 # Inkava Production Planner
 
-Website để nhập file booking Excel, tổng hợp nhu cầu theo leadtime, đối chiếu với năng lực nhà máy và lưu lịch sử vào SQLite.
+Ứng dụng nhập file booking Excel, đối chiếu tiến độ nhận/giao BTP theo leadtime và lưu lịch sử vào SQLite.
 
 ## Chạy local
 
@@ -110,3 +110,22 @@ Mục **Tổng quan** phân loại lịch sử file thành:
 ## Preview bằng Sites
 
 GPT Sites chạy giao diện tĩnh và vẫn có thể đọc, tổng hợp file Excel ngay trong trình duyệt. Do bản preview không chạy Node.js, dữ liệu không được ghi vào SQLite; SQLite hoạt động khi chạy ứng dụng bằng `npm run dev`.
+
+## Kiểm tra dữ liệu và lưu an toàn
+
+Mã nguồn local cần **Node.js 24 trở lên**; ứng dụng desktop có sẵn runtime. Dùng `npm ci` để cài đúng các phiên bản trong lockfile.
+
+- Ngày Excel được giữ theo ngày lịch, không bị lùi ngày ở Việt Nam. Ngày không tồn tại bị từ chối.
+- `LINE QTY` và `HÌNH IN` phải có số hữu hạn, không âm. Ô thiếu/sai không bị tự thay thành 0. Lỗi nhập chỉ rõ sheet và dòng Excel. Cơ chế sửa cột và báo thiếu LINE/PO hiện có vẫn được giữ.
+- Một phiên nhập SQLite là giao dịch nguyên vẹn, gồm các dòng, lịch sử và kết quả kiểm tra. Thất bại không thay thế dữ liệu đã lưu.
+- Nếu chưa lưu được, ứng dụng giữ file cũ, hiện thông báo liên tục và nút **Thử lưu lại** cho workbook đang chờ. Lỗi đọc API không chuyển thành dữ liệu mẫu.
+- Trên hosting tĩnh, booking chi tiết và lịch sử được lưu cùng nhau trong trình duyệt. Nếu đầy bộ nhớ, dữ liệu cũ được phục hồi và ứng dụng báo lỗi, không báo nhập thành công.
+- Đọc kế hoạch cũ không thay thế booking mới nhất dùng cho đối chiếu nhận/giao, FIFO và xuất file.
+
+Build thông thường vẫn dùng browser storage; build `--mode desktop` dùng SQLite. Có thể đặt rõ `VITE_STATIC_PAGES=true` để thử chế độ tĩnh trong dev, hoặc `VITE_STATIC_PAGES=false` khi build cho máy chủ có API. Base URL không quyết định chế độ lưu. `PLANNER_DATA_DIR` đổi thư mục SQLite khi chạy local và khi kiểm thử.
+
+Thư viện Excel dùng alias ghim `xlsx: npm:@e965/xlsx@0.20.3`, bản đóng gói lại của bên thứ ba theo giấy phép Apache-2.0, không phải bản npm do SheetJS phát hành. [Commit phát hành có provenance](https://github.com/e965/sheetjs-npm-publisher/blob/1c8cc59fc6d62f5893f9d20564996ecc50d8eaa8/index.js) lấy source từ tag chính thức; lockfile ghim integrity tarball. Electron được cập nhật cùng major lên 44.10.0 để vá cảnh báo bảo mật của bản trước.
+
+Chạy `npm test`, `npm run build`, `npm run build:desktop`, `npm audit --audit-level=high`. Kiểm thử trình duyệt dùng `python test/browser-regression.py` sau khi cài Python Playwright và Chromium; đặt `CHROMIUM_EXECUTABLE` nếu cần chỉ định executable. Test dùng database tạm, không ghi vào dữ liệu đang dùng.
+
+Các bản nhập cũ từng sai ngày hoặc bị chuyển số lỗi thành 0 không thể tự khôi phục từ database; hãy nhập lại workbook gốc. Bản sửa không tự thay đổi ngày của lịch sử đã lưu.

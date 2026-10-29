@@ -20,7 +20,11 @@ test('exports the booking in the customer TH layout', () => {
   assert.deepEqual(workbook.SheetNames, ['KE HOACH GIAO HANG', 'TH', 'CAN DOI']);
   const deliveryPlan = XLSX.utils.sheet_to_json(workbook.Sheets['KE HOACH GIAO HANG'], { header: 1, defval: null, raw: true });
   assert.deepEqual(deliveryPlan[0].slice(0, 11), ['MÃ HÀNG', 'MÀU', 'PO', 'SS', 'SLHĐ', 'SLHĐ TỔNG', 'SL BTP NHẬN', 'LEADTIME', 'NGÀY NHẬN', 'NGÀY GIAO HỢP ĐỒNG', 'NGÀY GIAO THỰC TẾ']);
-  assert.equal(deliveryPlan[1][9], (Date.parse('2026-11-05T00:00:00Z') - Date.UTC(1899, 11, 30)) / 86400000);
+  // SheetJS 0.20 converts date-formatted numbers to Date in sheet_to_json,
+  // even with raw:true. Assert the serialized Excel cell contract directly.
+  const contractDate = workbook.Sheets['KE HOACH GIAO HANG'].J2;
+  assert.deepEqual({ t: contractDate.t, v: contractDate.v, z: contractDate.z },
+    { t: 'n', v: 46331, z: 'dd/mm/yyyy' });
   assert.equal(deliveryPlan[1][10], null);
   const table = XLSX.utils.sheet_to_json(workbook.Sheets.TH, { header: 1, defval: null, raw: true, blankrows: true });
 
@@ -56,4 +60,25 @@ test('builds the delivery slip workbook with totals and signatures', async () =>
   assert.equal(table[0][0], 'CÔNG TY TNHH INKAVA');
   assert.equal(table[1][0], 'PHIẾU GIAO NHẬN VÀ ĐỐI CHIẾU BÁN THÀNH PHẨM (BTP)');
   assert.equal(slipFilename(new Date(2026, 9, 28)).startsWith('PHIEU_GIAO_NHAN_BTP_20261028'), true);
+});
+
+
+test('serialized exports preserve numeric calendar dates, row offsets and formulas', () => {
+  const rows = [{ line: '1', customer: 'Khách Việt', ref: 'R1', color: '1234567 BLUE',
+    modelCode: '1234567', season: 'SS27', po: 'PO1', lineQuantity: 10,
+    inputDate: '2026-10-29', outputDate: '2026-10-30', printCount: 2, leadTime: '1 ngày',
+    allocations: { 0: 10 } }];
+  const booking = { rows, days: [{ date: '2026-10-29', returnDate: '2026-10-30' }] };
+  const { items } = summarizeLots({ bookingRows: rows });
+  const book = buildExportWorkbook({ booking, lots: items });
+  const bytes = XLSX.write(book, { type: 'buffer', bookType: 'xlsx' });
+  const serialized = XLSX.read(bytes, { type: 'buffer', cellDates: false, cellNF: true });
+  const date = serialized.Sheets['KE HOACH GIAO HANG'].J2;
+  assert.deepEqual({ t: date.t, v: date.v, z: date.z }, { t: 'n', v: 46325, z: 'dd/mm/yyyy' });
+  assert.equal(serialized.Sheets.TH.I6.v, 46324);
+  assert.equal(serialized.Sheets.TH.J6.v, 46325);
+  assert.equal(serialized.Sheets['CAN DOI']['!ref'].split(':')[0], 'A3');
+  assert.equal(serialized.Sheets['CAN DOI'].H5.f, 'SUM(N5:N5)');
+  assert.equal(serialized.Sheets['CAN DOI'].H5.v, 10);
+  assert.equal(serialized.Sheets['KE HOACH GIAO HANG'].A2.v, 'R1');
 });

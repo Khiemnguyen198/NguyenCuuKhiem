@@ -4,9 +4,8 @@ import { analyzeBookingRows } from './local-ai.js';
 import { crossCheckSheets, readBooking, readWorkbook, summarizeBooking } from './booking-import.js';
 import { batchRow, batchRows, defaultWeekKey, weeksFromDays } from './batches.js';
 import { workWeekLabel } from './calendar.js';
-import { DEMO_DASHBOARD } from './demo-data.js';
 import { escapeHtml, formatFileDate, formatNumber } from './format.js';
-import { getPinnedLots, readJson, savePinnedLots, writeJson } from './storage.js';
+import { getPinnedLots, readJson, savePinnedLots, writeJson, writeJsonEntries } from './storage.js';
 import { appTemplate } from './template.js';
 import { PAGE_SIZE, STATUS_COPY, colorName, matchesFilters, renderCustomerRows, renderKpis, renderModelRows } from './models-view.js';
 import { readWarehouseWorkbook } from './warehouse-import.js';
@@ -22,11 +21,15 @@ import { checkIssues, renderCheckReport } from './check-view.js';
 import { checkBookingSheet } from './booking-check.js';
 import { calendarOrders, filterCalendar, renderCalendar, renderOrderDetail, weekColumns } from './calendar-view.js';
 
-// Production builds are static (browser storage) except the desktop build (`--mode desktop`),
-// which talks to the SQLite server bundled in the app.
-const isStaticPages = (import.meta.env.PROD && import.meta.env.MODE !== 'desktop') || import.meta.env.BASE_URL !== '/';
-
-const fallbackDashboard = DEMO_DASHBOARD;
+// Explicit build mode preserves static hosting and the desktop SQLite server.
+const isStaticPages = __STATIC_PAGES__;
+const fallbackDashboard = { source: 'empty', importId: null, filename: 'Chưa có file booking', rowCount: 0, totalQuantity: 0, totalImpressions: 0, uniquePo: 0, leadTimes: [], models: [] };
+let dashboardRequest = 0;
+let latestBookingRequest = 0;
+let aiCheckRequest = 0;
+let pendingBooking = null;
+let bookingSaving = false;
+const storageErrors = {};
 
 let dashboardState = fallbackDashboard;
 // The newest booking import; the overview and product joins always use it, whichever plan is open.
@@ -40,16 +43,7 @@ let batchKey = readJson('planner-batch', null);
 // '' = the whole week, otherwise the index of one PXC day in it.
 let dayKey = readJson('planner-day', '');
 let activeImportId = fallbackDashboard.importId;
-let fileHistoryState = [{
-  id: 'demo-original',
-  importId: 'demo-plan',
-  category: 'original',
-  filename: fallbackDashboard.filename,
-  createdAt: '2026-10-26T14:32:00+07:00',
-  rowCount: fallbackDashboard.rowCount,
-  totalQuantity: fallbackDashboard.totalQuantity,
-  note: 'File gốc được giữ nguyên; hệ thống chỉ đọc dữ liệu.'
-}];
+let fileHistoryState = [];
 
 document.querySelector('#app').innerHTML = appTemplate({ isStaticPages, appVersion: __APP_VERSION__, canBrowse: Boolean(window.planner?.pickExcelPath), ...workWeekLabel() });
 
@@ -69,9 +63,11 @@ releaseNotes.addEventListener('keydown', (event) => {
 });
 
 function renderDashboard(data) {
+  activeImportId = data.importId;
+  aiCheckRequest++;
   dashboardState = { ...fallbackDashboard, ...data };
-  document.querySelector('#filename').textContent = data.filename;
-  const sourceLabel = data.source === 'sqlite' ? 'Đã lưu SQLite' : data.source === 'browser' ? 'Đã đọc trong trình duyệt' : 'Dữ liệu mẫu';
+  document.querySelector('#filename').textContent = data.filename || 'Chưa có file booking';
+  const sourceLabel = data.source === 'sqlite' ? 'Đã lưu SQLite' : data.source === 'browser' ? 'Đã lưu trên trình duyệt • Không lưu SQLite' : 'Chưa có dữ liệu';
   document.querySelector('#fileMeta').textContent = `${sourceLabel} • ${formatNumber.format(data.rowCount)} dòng`;
   document.querySelector('#rowCount').textContent = `${formatNumber.format(data.rowCount)} dòng booking`;
   document.querySelector('#totalQuantity').textContent = formatNumber.format(data.totalQuantity);
@@ -93,7 +89,7 @@ function fileAction(file) {
 }
 
 function saveBrowserFiles(files) {
-  if (!writeJson('planner-file-history', files.filter((file) => file.id !== 'demo-original'))) showToast('Trình duyệt không cho lưu lịch sử file.', 'error');
+  if (!writeJson('planner-file-history', files.filter((file) => file.id !== 'demo-original'))) throw new Error('Trình duyệt không cho lưu lịch sử file. Dữ liệu trước đó được giữ nguyên.');
 }
 
 async function markFile(fileId, category, note = null) {
@@ -170,17 +166,19 @@ function renderFileHistory(files = fileHistoryState) {
 async function loadFileHistory() {
   if (isStaticPages) {
     const stored = readJson('planner-file-history', []);
-    if (Array.isArray(stored) && stored.length) fileHistoryState = stored;
+    fileHistoryState = Array.isArray(stored) ? stored.filter((file) => file.id !== 'demo-original') : [];
     renderFileHistory(fileHistoryState);
     return;
   }
   try {
     const response = await fetch('/api/files');
-    if (!response.ok) throw new Error();
+    if (!response.ok) throw new Error('Không đọc được lịch sử từ SQLite.');
     const payload = await response.json();
     renderFileHistory(payload.files);
-  } catch {
+    setStorageStatus('', 'history');
+  } catch (error) {
     renderFileHistory(fileHistoryState);
+    setStorageStatus(error.message || NETWORK_MESSAGE, 'history');
   }
 }
 
@@ -217,10 +215,8 @@ function openPlanView() {
 }
 
 async function openPlanDetail(importId = null) {
-  activeImportId = importId || fallbackDashboard.importId;
   openPlanView();
-  await loadDashboard(importId);
-  await loadAiCheck(activeImportId);
+  if (await loadDashboard(importId)) await loadAiCheck(activeImportId);
 }
 
 function aiStatusCopy(report) {
@@ -242,7 +238,7 @@ function renderAiCheck(report) {
   score.dataset.status = report.status;
   const container = document.querySelector('#aiFindings');
   if (!report.findings?.length) {
-    container.innerHTML = `<div class="ai-empty ai-empty--good"><i class="ph ph-${report.status === 'empty' ? 'database' : 'check-circle'}"></i><strong>${report.status === 'empty' ? 'Chưa có kết quả kiểm tra' : 'Không phát hiện bất thường'}</strong><span>${report.status === 'empty' ? 'File mẫu không nằm trong SQLite. Hãy nhập file booking thật.' : `Đã rà soát ${formatNumber.format(report.rowCount)} dòng booking.`}</span></div>`;
+    container.innerHTML = `<div class="ai-empty ai-empty--good"><i class="ph ph-${report.status === 'empty' ? 'database' : 'check-circle'}"></i><strong>${report.status === 'empty' ? 'Chưa có kết quả kiểm tra' : 'Không phát hiện bất thường'}</strong><span>${report.status === 'empty' ? 'Nhập file booking để bắt đầu kiểm tra.' : `Đã rà soát ${formatNumber.format(report.rowCount)} dòng booking.`}</span></div>`;
     return;
   }
   container.innerHTML = report.findings.map((finding) => `
@@ -254,6 +250,7 @@ function renderAiCheck(report) {
 }
 
 async function loadAiCheck(importId, force = false) {
+  const requestId = ++aiCheckRequest;
   document.querySelector('#aiFindings').innerHTML = '<div class="ai-empty"><i class="ph ph-spinner-gap spin"></i><strong>AI local đang kiểm tra</strong><span>Đọc dữ liệu booking và tìm điểm bất thường…</span></div>';
   try {
     if (isStaticPages) {
@@ -264,8 +261,10 @@ async function loadAiCheck(importId, force = false) {
     const response = await fetch(`/api/ai-check?id=${encodeURIComponent(importId)}${force ? '&force=1' : ''}`);
     const report = await response.json();
     if (!response.ok) throw new Error(report.error || 'Không thể kiểm tra file.');
+    if (requestId !== aiCheckRequest || String(importId) !== String(activeImportId)) return;
     renderAiCheck(report);
   } catch (error) {
+    if (requestId !== aiCheckRequest || String(importId) !== String(activeImportId)) return;
     renderAiCheck({ status: 'empty', score: null, rowCount: 0, findingCount: 0, findings: [] });
     showToast(error.message, 'error');
   }
@@ -297,10 +296,10 @@ function sourceMeta(source, detail, kind) {
 }
 
 function renderSources() {
-  const booking = latestBooking.source === 'demo' ? null : latestBooking;
+  const booking = !latestBooking.importId ? null : latestBooking;
   document.querySelector('#sourceMeta-booking').innerHTML = booking
     ? sourceMeta({ filename: booking.filename, importedAt: booking.importedAt || booking.createdAt }, `${formatNumber.format(booking.rowCount)} dòng · ${formatNumber.format(lotSummary ? lotSummary.items.filter((item) => !item.outsideBooking).length : 0)} lô`, 'booking')
-    : '<span class="muted">Chưa có file booking (đang hiện dữ liệu mẫu)</span>';
+    : '<span class="muted">Chưa có file booking. Chọn file để bắt đầu.</span>';
   const receiptCount = sourceState.receipts.lines.reduce((sum, line) => sum + (line.receipts ?? 1), 0);
   document.querySelector('#sourceMeta-receipts').innerHTML = sourceMeta(sourceState.receipts, `${formatNumber.format(receiptCount)} lần nhận`, 'receipts');
   document.querySelector('#sourceMeta-deliveries').innerHTML = sourceMeta(sourceState.deliveries, `${formatNumber.format(sourceState.deliveries.lines.length)} dòng PO`, 'deliveries');
@@ -342,7 +341,7 @@ function renderWarehouse() {
 // Bottom-right bubble: export the selected week (or day) from any page.
 function renderExportFab() {
   const fab = document.querySelector('#exportFab');
-  fab.hidden = latestBooking.source === 'demo' || !bookingDetail.rows.length;
+  fab.hidden = !latestBooking.importId || !bookingDetail.rows.length;
   const booking = activeBooking();
   document.querySelector('#exportFabScope').textContent = booking.batch ? booking.batch.label.replace(/ \(.*\)$/, '') : 'Cả file booking';
   fab.title = `Xuất TH + CAN DOI cho ${booking.batch?.label || 'cả file booking'}`;
@@ -500,7 +499,7 @@ function renderPlanResults() {
   const isFiltered = Boolean(planQuery || planCustomer || planStatus);
   document.querySelector('#planResultsCount').textContent = isFiltered ? `${formatNumber.format(shown.length)} / ${formatNumber.format(orders.length)} đơn` : `${formatNumber.format(orders.length)} đơn`;
   const files = [
-    latestBooking.source === 'demo' ? 'booking mẫu' : `booking: ${latestBooking.filename}`,
+    !latestBooking.importId ? 'chưa có booking' : `booking: ${latestBooking.filename}`,
     sourceState.receipts.filename ? `nhận: ${sourceState.receipts.filename}` : 'chưa có file nhận',
     sourceState.deliveries.filename ? `giao: ${sourceState.deliveries.filename}` : 'chưa có file giao'
   ];
@@ -633,21 +632,17 @@ function closeSlipModal() {
   document.querySelector('#slipModal').setAttribute('aria-hidden', 'true');
 }
 
-async function loadBookingDetail() {
-  bookingDetail = EMPTY_DETAIL;
-  if (latestBooking.source === 'demo') return;
+async function loadBookingDetail(booking) {
+  if (!booking.importId) return EMPTY_DETAIL;
   if (isStaticPages) {
     const stored = readJson('planner-booking-rows', null);
-    const file = fileHistoryState.find((item) => item.category === 'original' && String(item.importId) === String(latestBooking.importId));
-    if (stored && String(stored.importId) === String(latestBooking.importId)) bookingDetail = { days: [], ...stored, sheetCheck: file?.sheetCheck || null };
-    return;
+    const file = fileHistoryState.find((item) => item.category === 'original' && String(item.importId) === String(booking.importId));
+    if (stored && String(stored.importId) === String(booking.importId)) return { days: [], ...stored, sheetCheck: file?.sheetCheck || null };
+    throw new Error('Không tìm thấy chi tiết booking trên trình duyệt. Nhập lại workbook gốc để khôi phục.');
   }
-  try {
-    const response = await fetch(`/api/booking-rows?id=${encodeURIComponent(latestBooking.importId)}`);
-    if (response.ok) bookingDetail = { importId: latestBooking.importId, ...await response.json() };
-  } catch {
-    bookingDetail = EMPTY_DETAIL;
-  }
+  const response = await fetch(`/api/booking-rows?id=${encodeURIComponent(booking.importId)}`);
+  if (!response.ok) throw new Error('Không đọc được chi tiết booking từ SQLite. Dữ liệu đang xem được giữ nguyên.');
+  return { importId: booking.importId, ...await response.json() };
 }
 
 function renderOverview() {
@@ -657,8 +652,8 @@ function renderOverview() {
   document.querySelector('#overviewWarnings').innerHTML = renderWarnings(warehouseSummary.totals, latestAiReport);
   const booking = activeBooking();
   document.querySelector('#overviewLeadtimeBody').innerHTML = renderLeadtimeRows(booking, warehouseSummary);
-  document.querySelector('#overviewMeta').textContent = latestBooking.source === 'demo'
-    ? 'Đang hiện booking mẫu. Nhập file booking thật ở mục Nguồn dữ liệu.'
+  document.querySelector('#overviewMeta').textContent = !latestBooking.importId
+    ? 'Chưa có booking. Nhập file ở mục Nguồn dữ liệu.'
     : booking.batch
       ? `${booking.batch.label}: ${formatNumber.format(booking.rowCount)} dòng booking phân bổ trong tuần · số lượng, nhận và giao chỉ tính phần của tuần này.`
       : `Booking: ${latestBooking.filename} · số nhận/giao lấy từ file nhận và file giao mới nhất.`;
@@ -667,7 +662,7 @@ function renderOverview() {
 // Plan pages: the newest booking is shown for the selected week, like the overview; older
 // imports have no row detail and keep their file totals.
 function renderPlanProgress() {
-  const isLatest = String(dashboardState.importId) === String(latestBooking.importId) && latestBooking.source !== 'demo';
+  const isLatest = String(dashboardState.importId) === String(latestBooking.importId) && Boolean(latestBooking.importId);
   const booking = isLatest ? activeBooking() : dashboardState;
   const lots = isLatest ? (warehouseSummary?.items || []).filter((item) => !item.outsideBooking) : [];
   if (isLatest && booking.batch) {
@@ -730,9 +725,12 @@ async function loadSources() {
     }
     try {
       const response = await fetch(`/api/sources?kind=${kind}`);
-      if (response.ok) sourceState[kind] = await response.json();
-    } catch {
-      showToast('Không đọc được dữ liệu nhận/giao từ SQLite.', 'error');
+      if (!response.ok) throw new Error(`Không đọc được nguồn ${SOURCES[kind].title} từ SQLite. Số liệu đang xem chưa được làm mới.`);
+      sourceState[kind] = await response.json();
+      setStorageStatus('', `source-${kind}`);
+    } catch (error) {
+      setStorageStatus(error.message || NETWORK_MESSAGE, `source-${kind}`);
+      showToast(error.message, 'error');
     }
   }
   renderWarehouse();
@@ -786,13 +784,14 @@ async function loadOrigins() {
 }
 
 async function saveOrigin(kind, origin, { mtime = null, hash = null } = {}) {
-  originState[kind] = origin ? { origin, mtime, hash, checkedAt: new Date().toISOString() } : null;
+  const nextOrigin = origin ? { origin, mtime, hash, checkedAt: new Date().toISOString() } : null;
   if (isStaticPages) {
-    writeJson('planner-origins', originState);
-    return;
+    if (!writeJson('planner-origins', { ...originState, [kind]: nextOrigin })) throw new Error('Trình duyệt không cho lưu nguồn dữ liệu. Nguồn trước đó được giữ nguyên.');
+  } else {
+    const response = await fetch('/api/origins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, ...(nextOrigin || { origin: null }) }) });
+    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Không lưu được nguồn dữ liệu.');
   }
-  const response = await fetch('/api/origins', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, ...(originState[kind] || { origin: null }) }) });
-  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Không lưu được nguồn dữ liệu.');
+  originState[kind] = nextOrigin;
 }
 
 async function readOrigin(origin) {
@@ -872,7 +871,7 @@ async function deleteSource(kind) {
     await loadChanges();
   } else {
     if (isStaticPages) {
-      writeJson(`planner-source-${kind}`, null);
+      if (!writeJson(`planner-source-${kind}`, null)) throw new Error('Trình duyệt không cho xoá nguồn dữ liệu. File trước đó được giữ nguyên.');
     } else {
       const response = await fetch(`/api/sources?kind=${kind}`, { method: 'DELETE' });
       if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Không xoá được file.');
@@ -884,24 +883,19 @@ async function deleteSource(kind) {
   showToast(`Đã xoá file của mục ${title}.`);
 }
 
-async function loadLatestAiReport() {
-  latestAiReport = null;
-  if (latestBooking.source === 'demo') return;
-  if (isStaticPages) {
-    latestAiReport = fileHistoryState.find((file) => String(file.importId) === String(latestBooking.importId) && file.aiReport)?.aiReport || null;
-    return;
-  }
+async function loadLatestAiReport(booking) {
+  if (!booking.importId) return null;
+  if (isStaticPages) return fileHistoryState.find((file) => String(file.importId) === String(booking.importId) && file.aiReport)?.aiReport || null;
   try {
-    const response = await fetch(`/api/ai-check?id=${encodeURIComponent(latestBooking.importId)}`);
-    if (response.ok) latestAiReport = await response.json();
-  } catch {
-    latestAiReport = null;
-  }
+    const response = await fetch(`/api/ai-check?id=${encodeURIComponent(booking.importId)}`);
+    if (!response.ok) throw new Error('Không đọc được báo cáo kiểm tra booking.');
+    return await response.json();
+  } catch (error) { showToast(error.message, 'error'); return null; }
 }
 
 function checkSources() {
   return {
-    booking: latestBooking.source === 'demo' ? null : { filename: latestBooking.filename, importedAt: latestBooking.importedAt },
+    booking: !latestBooking.importId ? null : { filename: latestBooking.filename, importedAt: latestBooking.importedAt },
     receipts: sourceState.receipts,
     deliveries: sourceState.deliveries
   };
@@ -1026,9 +1020,6 @@ async function markChangesReviewed(importId) {
 function diffWithPreviousBrowserImport({ rows, days }, filename, importId) {
   const previous = readJson('planner-booking-rows', null);
   const compact = compactRows(rows);
-  if (!writeJson('planner-booking-rows', { importId, filename, days, rows: compact })) {
-    showToast('Trình duyệt không đủ chỗ lưu bản booking để đối chiếu và chia đợt.', 'error');
-  }
   if (!previous?.rows?.length) return null;
   const report = diffBookingRows(previous.rows, compact, { previousDays: previous.days, currentDays: days });
   return report.hasChanges ? { previousFilename: previous.filename, createdAt: new Date().toISOString(), reviewedAt: null, report } : null;
@@ -1066,25 +1057,69 @@ function browserDashboard(file) {
 }
 
 // Without an id this loads the newest booking, which also becomes the overview's booking.
+function setStorageStatus(error = '', scope = 'booking') {
+  storageErrors[scope] = error;
+  error = Object.values(storageErrors).filter(Boolean).join(' ');
+  const status = document.querySelector('#storageStatus');
+  status.textContent = error ? 'Lỗi lưu / đọc dữ liệu' : isStaticPages ? 'Lưu trên trình duyệt' : 'SQLite đã kết nối';
+  const notice = document.querySelector('#storageNotice');
+  notice.hidden = !error && !isStaticPages;
+  notice.classList.toggle('storage-notice--error', Boolean(error));
+  notice.textContent = error || 'Chế độ trình duyệt: lưu trên thiết bị này, không lưu SQLite và không đồng bộ giữa thiết bị. Không lưu lại file Excel gốc.';
+}
+
+function renderPendingBooking(error = '') {
+  const element = document.querySelector('#pendingBooking');
+  element.hidden = !pendingBooking;
+  element.innerHTML = pendingBooking ? `<div><strong>Chưa lưu file ${escapeHtml(pendingBooking.filename)}</strong><p>${escapeHtml(error || 'Đang lưu dữ liệu…')} File đã lưu trước đó được giữ nguyên.</p></div><button type="button" id="retryBooking" class="secondary-button" ${bookingSaving ? 'disabled' : ''}>Thử lưu lại</button>` : '';
+  element.querySelector('#retryBooking')?.addEventListener('click', () => {
+    const pending = pendingBooking;
+    withBusyButton(element.querySelector('#retryBooking'), 'Đang lưu', async () => {
+      await importBooking(pending.buffer, pending.filename, pending.origin, pending.options);
+      try { await saveOrigin('booking', pending.origin, { hash: await contentHash(pending.buffer) }); }
+      catch (error) { showToast(`Booking đã lưu nhưng chưa cập nhật được nguồn tự làm mới: ${error.message}`, 'error'); }
+      renderSources();
+    });
+  });
+}
+
 async function loadDashboard(importId = null) {
+  const requestId = ++dashboardRequest;
+  const latestRequest = importId ? null : ++latestBookingRequest;
   let data = fallbackDashboard;
-  if (isStaticPages) {
-    const originals = fileHistoryState.filter((file) => file.category === 'original' && file.id !== 'demo-original');
-    const selected = importId ? originals.find((file) => String(file.importId) === String(importId)) : originals[0];
-    if (selected) data = browserDashboard(selected);
-  } else {
-    try {
+  try {
+    if (isStaticPages) {
+      const originals = fileHistoryState.filter((file) => file.category === 'original' && file.id !== 'demo-original');
+      const selected = importId ? originals.find((file) => String(file.importId) === String(importId)) : originals[0];
+      if (selected) data = browserDashboard(selected);
+      else if (importId) throw new Error('Không tìm thấy phiên nhập booking.');
+    } else {
       const response = await fetch(importId ? `/api/dashboard?id=${encodeURIComponent(importId)}` : '/api/dashboard');
-      if (!response.ok) throw new Error('API không khả dụng');
+      if (!response.ok) throw new Error('Không đọc được booking từ SQLite. Dữ liệu đang xem được giữ nguyên.');
       data = await response.json();
-    } catch {
-      data = fallbackDashboard;
     }
+    // Historical plans keep their own totals; they must not replace the newest
+    // booking used by receipt/delivery matching, FIFO and export.
+    if (importId) {
+      if (requestId !== dashboardRequest) return false;
+      renderDashboard(data);
+    } else {
+      const [detail, report] = await Promise.all([loadBookingDetail(data), loadLatestAiReport(data)]);
+      if (latestRequest !== latestBookingRequest) return false;
+      latestBooking = data;
+      bookingDetail = detail;
+      latestAiReport = report;
+      if (requestId === dashboardRequest) renderDashboard(data);
+      renderWarehouse();
+    }
+    setStorageStatus();
+    return true;
+  } catch (error) {
+    if (importId ? requestId !== dashboardRequest : latestRequest !== latestBookingRequest) return false;
+    setStorageStatus(isNetworkError(error.message) ? NETWORK_MESSAGE : error.message);
+    showToast(error.message || NETWORK_MESSAGE, 'error');
+    return false;
   }
-  latestBooking = data;
-  await Promise.all([loadLatestAiReport(), loadBookingDetail()]);
-  renderDashboard(data);
-  renderWarehouse();
 }
 
 document.querySelector('#overviewView').addEventListener('click', async (event) => {
@@ -1098,49 +1133,72 @@ document.querySelector('#overviewView').addEventListener('click', async (event) 
 
 // Reads a booking workbook (from a file or a link) and stores it; returns the new import id.
 async function importBooking(buffer, filename, origin = null, { quiet = false } = {}) {
+  if (bookingSaving) throw new Error('Booking đang được lưu, chờ một chút rồi thử lại.');
   const workbook = readWorkbook(buffer);
   const { rows, days, repairs } = readBooking(workbook);
   if (!rows.length) throw new Error('Không tìm thấy dữ liệu booking hợp lệ (sheet TH hoặc LEADTIME).');
   // Cell-level problems of TH are kept with the import and listed in "Kiểm tra file".
   const sheetCheck = { ...crossCheckSheets(workbook), cells: checkBookingSheet(workbook), repairs };
   const summary = summarizeBooking(rows);
+  ++dashboardRequest;
+  ++latestBookingRequest;
   let importId;
   let hasChanges;
-  if (isStaticPages) {
-    importId = crypto.randomUUID();
-    const changes = diffWithPreviousBrowserImport({ rows, days }, filename, importId);
-    hasChanges = Boolean(changes);
-    const files = [{
-      id: importId,
-      importId,
-      category: 'original',
-      filename,
-      origin,
-      createdAt: new Date().toISOString(),
-      ...summary,
-      aiReport: analyzeBookingRows(rows, { sheetCheck }),
-      sheetCheck,
-      changes,
-      note: 'Chỉ lưu thông tin file; file Excel gốc không bị thay đổi.'
-    }, ...fileHistoryState.filter((item) => item.id !== 'demo-original')];
-    saveBrowserFiles(files);
-    renderFileHistory(files);
-  } else {
-    const response = await fetch('/api/imports', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename, rows, days, sheetCheck })
-    });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || 'Không thể lưu dữ liệu vào SQLite.');
-    importId = payload.importId;
-    hasChanges = Boolean(payload.changes);
-    await loadFileHistory();
-  }
+  pendingBooking = { buffer, filename, origin, options: { quiet } };
+  bookingSaving = true;
+  renderPendingBooking();
+  try {
+    if (isStaticPages) {
+      importId = crypto.randomUUID();
+      const changes = diffWithPreviousBrowserImport({ rows, days }, filename, importId);
+      hasChanges = Boolean(changes);
+      const files = [{
+        id: importId,
+        importId,
+        category: 'original',
+        filename,
+        origin,
+        createdAt: new Date().toISOString(),
+        ...summary,
+        aiReport: analyzeBookingRows(rows, { sheetCheck }),
+        sheetCheck,
+        changes,
+        note: 'Chỉ lưu thông tin file; file Excel gốc không bị thay đổi.'
+      }, ...fileHistoryState.filter((item) => item.id !== 'demo-original')];
+      if (!writeJsonEntries([
+        ['planner-booking-rows', { importId, filename, days, rows: compactRows(rows) }],
+        ['planner-file-history', files]
+      ])) throw new Error('Trình duyệt không đủ chỗ lưu booking và lịch sử. Dữ liệu trước đó được giữ nguyên.');
+      renderFileHistory(files);
+    } else {
+      const response = await fetch('/api/imports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename, rows, days, sheetCheck })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Không thể lưu dữ liệu vào SQLite.');
+      importId = payload.importId;
+      hasChanges = Boolean(payload.changes);
+      await loadFileHistory();
+    }
+    pendingBooking = null;
+    setStorageStatus('', 'save');
+  } catch (error) {
+    setStorageStatus(error.message || NETWORK_MESSAGE, 'save');
+    bookingSaving = false;
+    renderPendingBooking(isNetworkError(error.message) ? NETWORK_MESSAGE : error.message);
+    throw error;
+  } finally { bookingSaving = false; }
+  renderPendingBooking();
   // A refresh of the same file keeps the week the planner is looking at.
   if (!quiet) batchKey = null;
-  await loadDashboard();
+  const loaded = await loadDashboard();
   await loadChanges();
+  if (!loaded) {
+    showToast('Đã lưu booking, nhưng chưa tải lại được dữ liệu. Kiểm tra kết nối và tải lại trang; không cần nhập lại.', 'error');
+    return importId;
+  }
   if (hasChanges && quiet) {
     showToast('File booking vừa được cập nhật và có thay đổi: xem ở nút “Thay đổi booking”.', 'info');
   } else if (hasChanges) {
@@ -1214,6 +1272,7 @@ sourcesPanel.addEventListener('change', async (event) => {
   if (!kind || !file) return;
   const button = sourcesPanel.querySelector(`[data-pick-file="${kind}"]`);
   await withBusyButton(button, 'Đang đọc', async () => {
+    if (file.size > 25_000_000) throw new Error('File vượt giới hạn 25 MB.');
     await importSource(kind, await file.arrayBuffer(), file.name);
     // The source is now this file; stop refreshing from an older link or path.
     if (originState[kind]) await saveOrigin(kind, null);
@@ -1540,6 +1599,8 @@ if (window.planner) {
 }
 
 renderFileHistory();
+renderDashboard(fallbackDashboard);
+setStorageStatus(isStaticPages ? '' : 'Đang kết nối SQLite…');
 // Browser mode reads the booking history before it can pick the newest booking.
 (async () => {
   await loadFileHistory();
