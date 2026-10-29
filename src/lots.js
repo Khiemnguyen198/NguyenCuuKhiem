@@ -189,6 +189,57 @@ function assignRowDates(lots, receiptLines, deliveryLines) {
       }
     }
   }
+  // When the receipt has no matching ticket, quantities are already distributed
+  // by product/season FIFO above. Apply the same order to dated receipt events.
+  const pooledReceipts = new Map();
+  for (const line of receiptLines) {
+    if (!(Number(line.received) > 0)) continue;
+    const product = productOf(line.model, modelCodeOf(line.color));
+    const token = up(line.po);
+    const rows = compatibleRows(line);
+    // Directly matched tickets belong to the ticket path; explicit PO matches
+    // can conflict with quantity FIFO and must not be guessed as a pool.
+    if (token && rows.some(row => hasTicket(row.ticketNumber) && up(row.ticketNumber) === token)) continue;
+    const season = resolveSeason(product, line.season);
+    if (season == null) continue;
+    const key = `${product}|${season}`;
+    const group = pooledReceipts.get(key) || { lines: [], ambiguous: false };
+    if (token && rows.some(row => up(row.po) === token)) group.ambiguous = true;
+    group.lines.push(line);
+    pooledReceipts.set(key, group);
+  }
+  for (const [key, group] of pooledReceipts) {
+    if (group.ambiguous) continue;
+    const targets = lots.filter(lot => `${lot.product}|${up(lot.season)}` === key && !lot.ticketFields.has('received'))
+      .sort((a, b) => (Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))) || String(a.firstDue || '9').localeCompare(String(b.firstDue || '9')));
+    const rows = targets.flatMap(lot => lot.rows).filter(row => row.receivedFifo > 0);
+    if (!rows.length || rows.some(row => row.receiptDate || !Number.isSafeInteger(row.receivedFifo))) continue;
+    const events = [];
+    let complete = true;
+    for (const line of group.lines) {
+      if (!Number.isSafeInteger(Number(line.received))) { complete = false; break; }
+      if (Array.isArray(line.receiptDates)) {
+        if (line.undatedReceived || line.receiptDates.some(item => !validDate(item.date) || !Number.isSafeInteger(item.received) || item.received <= 0)
+          || line.receiptDates.reduce((sum, item) => sum + item.received, 0) !== Number(line.received)) { complete = false; break; }
+        events.push(...line.receiptDates);
+      } else if ((line.receipts ?? 1) === 1 && validDate(line.date)) {
+        events.push({ date: line.date, received: Number(line.received) });
+      } else { complete = false; break; }
+    }
+    if (!complete || events.reduce((sum, item) => sum + item.received, 0) < rows.reduce((sum, row) => sum + row.receivedFifo, 0)) continue;
+    events.sort((a, b) => a.date.localeCompare(b.date));
+    let index = 0, left = events[0]?.received || 0;
+    for (const row of rows) {
+      let needed = row.receivedFifo;
+      while (needed > 0 && index < events.length) {
+        const share = Math.min(needed, left);
+        if (share > 0) { row.receiptDate = events[index].date; row.receiptDateBasis = 'FIFO theo mã/mùa'; }
+        needed -= share;
+        left -= share;
+        if (!left) { index++; left = events[index]?.received || 0; }
+      }
+    }
+  }
   for (const line of deliveryLines) {
     if (!(Number(line.delivered) > 0 || Number(line.good) > 0) || !validDate(line.actualDeliveryDate)) continue;
     const compatible = compatibleRows(line).filter((row) => !hasTicket(line.ticket) || !hasTicket(row.ticketNumber) || up(line.ticket) === up(row.ticketNumber));

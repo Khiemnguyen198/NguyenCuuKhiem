@@ -82,3 +82,19 @@ test('serialized exports preserve numeric calendar dates, row offsets and formul
   assert.equal(serialized.Sheets['CAN DOI'].H5.v, 10);
   assert.equal(serialized.Sheets['KE HOACH GIAO HANG'].A2.v, 'R1');
 });
+
+test('contract TH export includes the matched BTP receipt date and its provenance', () => {
+  const rows = [{ line:'1', ref:'R', color:'1234567 BLUE', modelCode:'1234567', season:'SS27', po:'P', lineQuantity:10, inputDate:'2026-10-20', outputDate:'2026-10-30', printCount:1, leadTime:'1 ngày', allocations:{} }];
+  const receiptLines = [{ model:'R', color:'1234567 BLUE', season:'SS27', po:'', received:10, date:'2026-10-26' }];
+  const { items } = summarizeLots({ bookingRows:rows, receiptLines });
+  const book = buildExportWorkbook({ booking:{ rows, days:[] }, lots:items });
+  const sheet = XLSX.read(XLSX.write(book,{type:'buffer',bookType:'xlsx'}),{type:'buffer',cellNF:true}).Sheets.TH;
+  const header = XLSX.utils.sheet_to_json(sheet,{header:1,range:4,defval:null})[0];
+  const column = header.indexOf('Ngày nhận BTP');
+  const basis = header.indexOf('Nguồn ngày nhận BTP');
+  assert.ok(column > 0 && basis > 0);
+  const cell = sheet[XLSX.utils.encode_cell({r:5,c:column})];
+  assert.equal(cell.v, 46321);
+  assert.equal(sheet[XLSX.utils.encode_cell({r:5,c:basis})].v, 'FIFO theo mã/mùa');
+  assert.equal(sheet.I6.v, 46315, 'Booking INPUT remains intact');
+});

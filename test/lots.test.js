@@ -252,3 +252,20 @@ test('a missing receipt date prevents claiming the latest receipt date even for 
   assert.equal(bookingRows[0].receiptDate, null);
   assert.equal(bookingRows[0].receiptDateBasis, null);
 });
+
+test('dated receipts without a ticket follow the same product FIFO as allocated quantities', async () => {
+  const { compactReceiptLines } = await import('../src/receipts-import.js');
+  const makeRows = () => [row('PO-A', 40, '2026-11-05', { ticketNumber: '0' }), row('PO-B', 60, '2026-11-06', { ticketNumber: '0' })];
+  const receipts = [
+    { model: '353234', color: '9046670 1P BEA', season: 'SS27', po: '', received: 50, date: '2026-10-26' },
+    { model: '353234', color: '9046670 1P BEA', season: 'SS27', po: '', received: 50, date: '2026-10-28' }
+  ];
+  for (const lines of [receipts, compactReceiptLines(receipts)]) {
+    const rows = makeRows();
+    summarizeLots({ bookingRows: rows, receiptLines: lines });
+    assert.deepEqual(rows.map(r => [r.receivedFifo, r.receiptDate, r.receiptDateBasis]), [[40, '2026-10-26', 'FIFO theo mã/mùa'], [60, '2026-10-28', 'FIFO theo mã/mùa']]);
+  }
+  const rows = makeRows();
+  summarizeLots({ bookingRows: rows, receiptLines: [receipts[0], { ...receipts[1], date: null }] });
+  assert.deepEqual(rows.map(r => r.receiptDate), [null, null]);
+});

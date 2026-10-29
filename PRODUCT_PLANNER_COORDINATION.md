@@ -78,3 +78,4 @@ Always pull `master` before editing. Do not treat the GPT Sites deployment as th
 - Delivery planning adds one working day to each row's lead time, counting from the day after the matched BTP receipt. The factory calendar is Monday–Saturday, skipping Sundays.
 - Show the calculated expected date separately from the delivery-file date and the booking contract deadline; flag differences and late dates. A forecast is not proof that a delivery occurred.
 - Only attach receipt/delivery dates to a PO when source identification and allocation support it; leave ambiguous dates blank with a warning. Never substitute booking INPUT for an actual BTP receipt date.
+- The TH contract export includes BTP receipt date and matching provenance next to received quantity. Dated, unambiguously pooled receipt events follow the same product/season FIFO as quantities; unknown or incomplete dates remain empty.
