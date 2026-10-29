@@ -72,3 +72,9 @@ Always pull `master` before editing. Do not treat the GPT Sites deployment as th
 - Storage mode is explicit: ordinary builds remain static, desktop builds use the API, and VITE_STATIC_PAGES can override the mode. Base paths do not imply browser-only persistence.
 - Historical plan viewing does not replace the newest booking used for source matching and exports.
 - Excel and Electron dependencies are pinned to patched versions; the maintained XLSX mirror source is documented in README.
+
+## Delivery-date calculation
+
+- Delivery planning adds one working day to each row's lead time, counting from the day after the matched BTP receipt. The factory calendar is Monday–Saturday, skipping Sundays.
+- Show the calculated expected date separately from the delivery-file date and the booking contract deadline; flag differences and late dates. A forecast is not proof that a delivery occurred.
+- Only attach receipt/delivery dates to a PO when source identification and allocation support it; leave ambiguous dates blank with a warning. Never substitute booking INPUT for an actual BTP receipt date.

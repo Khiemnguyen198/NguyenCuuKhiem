@@ -130,3 +130,125 @@ test('pinned lot receives FIFO deliveries ahead of earlier due date lot', () => 
   assert.equal(late.good, 100);
   assert.equal(early.good, 0);
 });
+
+test('records receipt and delivery dates only against the matching PO and product', () => {
+  const bookingRows = [
+    row('PO-A', 50, '2026-11-05', { ticketNumber: '111' }),
+    row('PO-B', 50, '2026-11-06', { ticketNumber: '222' }),
+    row('PO-C', 50, '2026-11-07', { ticketNumber: '333' })
+  ];
+  const receiptLines = [
+    { model: '353234', color: '9046670 1P BEA', season: 'SS27', po: '111', received: 50, date: '2026-10-26' },
+    { model: '353234', color: '9046670 1P BEA', season: 'SS27', po: '222', received: 50, date: '2026-10-28' }
+  ];
+  const deliveryLines = [
+    delivery({ po: 'PO-A-OB', ticket: '111', delivered: 50, good: 50, actualDeliveryDate: '2026-10-29' }),
+    delivery({ po: 'PO-B-TB', ticket: '222', delivered: 50, good: 50, actualDeliveryDate: '2026-10-31' }),
+    delivery({ po: 'PO-C', ticket: '333', delivered: 0, good: 0, actualDeliveryDate: '2026-10-28' })
+  ];
+  summarizeLots({ bookingRows, receiptLines, deliveryLines });
+  assert.deepEqual(bookingRows.map(({ po, receiptDate, fileDeliveryDate }) => [po, receiptDate, fileDeliveryDate]), [
+    ['PO-A', '2026-10-26', '2026-10-29'],
+    ['PO-B', '2026-10-28', '2026-10-31'],
+    ['PO-C', null, null]
+  ]);
+});
+
+test('receipt FIFO assigns a date only to the PO receiving BTP; pooled delivery dates are not copied', () => {
+  const bookingRows = [row('PO-A', 30, '2026-11-05', { ticketNumber: '111' }), row('PO-B', 30, '2026-11-06', { ticketNumber: '111' })];
+  const receiptLines = [{ model: '353234', color: '9046670 1P BEA', season: 'SS27', po: '111', received: 30, date: '2026-10-26' }];
+  const deliveryLines = [delivery({ po: 'UNMATCHED', ticket: '', delivered: 30, good: 30, actualDeliveryDate: '2026-10-29' })];
+  summarizeLots({ bookingRows, receiptLines, deliveryLines });
+  assert.deepEqual(bookingRows.map(({ receiptDate, receiptDateBasis, fileDeliveryDate }) => [receiptDate, receiptDateBasis, fileDeliveryDate]), [['2026-10-26', 'FIFO theo phiếu', null], [null, null, null]]);
+});
+
+test('duplicate PO, mismatched season or ticket, zero quantity, and stale compact receipts cannot imply dates', () => {
+  const bookingRows = [
+    row('PO-A', 10, '2026-11-05', { ticketNumber: '111' }),
+    row('PO-A', 10, '2026-11-06', { ticketNumber: '222' }),
+    row('PO-B', 0, '2026-11-07', { ticketNumber: '333' })
+  ];
+  const receiptLines = [
+    { model: '353234', color: '9046670 1P BEA', season: 'SS27', po: '111', received: 10, receipts: 2, date: '2026-10-28' },
+    { model: '353234', color: '9046670 1P BEA', season: 'SS27', po: '333', received: 0, date: '2026-10-26' }
+  ];
+  const deliveryLines = [
+    delivery({ po: 'PO-A', delivered: 10, good: 10, actualDeliveryDate: '2026-10-29' }),
+    delivery({ po: 'PO-B', ticket: '444', delivered: 10, good: 10, actualDeliveryDate: '2026-10-30' }),
+    delivery({ po: 'PO-B', model: 'OTHER', season: 'AW28', ticket: '333', delivered: 10, good: 10, actualDeliveryDate: '2026-10-31' })
+  ];
+  summarizeLots({ bookingRows, receiptLines, deliveryLines });
+  assert.deepEqual(bookingRows.map(({ receiptDate, fileDeliveryDate }) => [receiptDate, fileDeliveryDate]), [[null, null], [null, null], [null, null]]);
+});
+
+test('a freshly compacted receipt keeps the latest date with actual received BTP', async () => {
+  const { compactReceiptLines } = await import('../src/receipts-import.js');
+  const bookingRows = [row('PO-A', 10, '2026-11-05', { ticketNumber: '111' })];
+  const receiptLines = compactReceiptLines([
+    { model: '353234', color: '9046670 1P BEA', season: 'SS27', po: '111', received: 10, shipped: 0, date: '2026-10-26' },
+    { model: '353234', color: '9046670 1P BEA', season: 'SS27', po: '111', received: 0, shipped: 10, date: '2026-10-29' }
+  ]);
+  summarizeLots({ bookingRows, receiptLines });
+  assert.equal(receiptLines[0].date, '2026-10-29');
+  assert.equal(receiptLines[0].lastReceivedDate, '2026-10-26');
+  assert.equal(bookingRows[0].receiptDate, '2026-10-26');
+});
+
+test('FIFO uses chronological dated receipts for multiple PO rows sharing a ticket', async () => {
+  const { compactReceiptLines } = await import('../src/receipts-import.js');
+  const makeBooking = () => [
+    row('PO-A', 40, '2026-11-05', { ticketNumber: '111' }),
+    row('PO-B', 60, '2026-11-06', { ticketNumber: '111' })
+  ];
+  const receiptLines = [
+    { model: '353234', color: '9046670 1P BEA', season: 'SS27OW02', po: '111', received: 50, date: '2026-10-28' },
+    { model: '353234', color: '9046670 1P BEA', season: 'SS27', po: '111', received: 50, date: '2026-10-26' }
+  ];
+  // Different source season spellings resolve to the sole booking season.
+  const bookingRows = makeBooking();
+  summarizeLots({ bookingRows, receiptLines });
+  assert.deepEqual(bookingRows.map(({ receiptDate, receiptDateBasis, receivedFifo }) => [receiptDate, receiptDateBasis, receivedFifo]), [
+    ['2026-10-26', 'FIFO theo phiếu', 40], ['2026-10-28', 'FIFO theo phiếu', 60]
+  ]);
+  // Static storage retains the dated quantity events; identical source season permits compaction.
+  const compact = compactReceiptLines(receiptLines.map((line) => ({ ...line, season: 'SS27' })));
+  assert.deepEqual(compact[0].receiptDates, [{ date: '2026-10-26', received: 50 }, { date: '2026-10-28', received: 50 }]);
+  const staticRows = makeBooking();
+  summarizeLots({ bookingRows: staticRows, receiptLines: compact });
+  assert.deepEqual(staticRows.map((r) => r.receiptDate), ['2026-10-26', '2026-10-28']);
+});
+
+test('shared-ticket FIFO leaves dates unknown when any receipt has no date or old compact data lost dates', () => {
+  const bookingRows = [row('PO-A', 40, '2026-11-05', { ticketNumber: '111' }), row('PO-B', 60, '2026-11-06', { ticketNumber: '111' })];
+  const base = { model: '353234', color: '9046670 1P BEA', season: 'SS27', po: '111' };
+  summarizeLots({ bookingRows, receiptLines: [{ ...base, received: 50, date: '2026-10-26' }, { ...base, received: 50, date: null }] });
+  assert.deepEqual(bookingRows.map((r) => r.receiptDate), [null, null]);
+  summarizeLots({ bookingRows, receiptLines: [{ ...base, received: 100, receipts: 2, date: '2026-10-28' }] });
+  assert.deepEqual(bookingRows.map((r) => r.receiptDate), [null, null]);
+});
+
+test('date matching accepts alternate season only for a product with one booking season', () => {
+  const receipt = { model: '353234', color: '9046670 1P BEA', season: 'SS27OW02', po: '111', received: 10, date: '2026-10-26' };
+  const deliveryLine = delivery({ po: 'PO-A', season: 'SS27OW02', ticket: '111', delivered: 10, good: 10, actualDeliveryDate: '2026-10-29' });
+  const unique = [row('PO-A', 10, '2026-11-05', { ticketNumber: '111' })];
+  summarizeLots({ bookingRows: unique, receiptLines: [receipt], deliveryLines: [deliveryLine] });
+  assert.deepEqual([unique[0].receiptDate, unique[0].fileDeliveryDate], ['2026-10-26', '2026-10-29']);
+  const multiple = [row('PO-A', 10, '2026-11-05', { ticketNumber: '111' }), row('PO-B', 10, '2026-11-06', { ticketNumber: '222', season: 'AW28' })];
+  summarizeLots({ bookingRows: multiple, receiptLines: [receipt], deliveryLines: [deliveryLine] });
+  assert.deepEqual([multiple[0].receiptDate, multiple[0].fileDeliveryDate], [null, null]);
+});
+
+test('a missing receipt date prevents claiming the latest receipt date even for a uniquely matched PO', async () => {
+  const { compactReceiptLines } = await import('../src/receipts-import.js');
+  const bookingRows = [row('PO-A', 10, '2026-11-05', { ticketNumber: '111' })];
+  const base = { model: '353234', color: '9046670 1P BEA', season: 'SS27', po: '111' };
+  const receipts = [{ ...base, received: 5, date: '2026-10-26' }, { ...base, received: 5, date: null }];
+  summarizeLots({ bookingRows, receiptLines: receipts });
+  assert.equal(bookingRows[0].receiptDate, null);
+  assert.equal(bookingRows[0].receiptDateBasis, null);
+  const compact = compactReceiptLines(receipts);
+  assert.equal(compact[0].undatedReceived, true);
+  summarizeLots({ bookingRows, receiptLines: compact });
+  assert.equal(bookingRows[0].receiptDate, null);
+  assert.equal(bookingRows[0].receiptDateBasis, null);
+});

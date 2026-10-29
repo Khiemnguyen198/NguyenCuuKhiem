@@ -19,7 +19,7 @@ function createWindow(port) {
     minWidth: 960,
     minHeight: 640,
     title: APP_TITLE,
-    icon: join(app.getAppPath(), 'dist-desktop', 'inkava-logo.png'),
+    icon: join(app.getAppPath(), 'dist-desktop', process.platform === 'darwin' ? 'inkava-icon-mac.png' : 'inkava-logo.png'),
     backgroundColor: '#f7fafc',
     autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, sandbox: true, preload: join(dirname(fileURLToPath(import.meta.url)), 'preload.cjs') }

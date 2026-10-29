@@ -88,6 +88,121 @@ function receiptUnits(receiptLines) {
   return [...units.values()];
 }
 
+// Dates are evidence about individual source rows, unlike quantities that may
+// be pooled by product and distributed FIFO. A pooled date cannot establish
+// which PO was received or delivered, so only unique identifiers are used.
+function assignRowDates(lots, receiptLines, deliveryLines) {
+  const byProduct = new Map();
+  const resolveSeason = seasonResolver(lots);
+  for (const lot of lots) {
+    for (const row of lot.rows) {
+      row.receiptDate = null;
+      row.receiptDateBasis = null;
+      row.fileDeliveryDate = null;
+      const key = productOf(row.ref, modelCodeOf(row.color, row.modelCode));
+      const rows = byProduct.get(key) || [];
+      rows.push(row);
+      byProduct.set(key, rows);
+    }
+  }
+  const compatibleRows = (line) => {
+    const key = productOf(line.model, modelCodeOf(line.color));
+    const season = resolveSeason(key, line.season);
+    return season == null ? [] : (byProduct.get(key) || []).filter((row) => up(row.season) === season);
+  };
+  const latest = (previous, candidate) => !previous || candidate > previous ? candidate : previous;
+  const validDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? ''));
+  const directReceipts = new Map();
+  for (const line of receiptLines) {
+    if (!(Number(line.received) > 0) || !hasTicket(line.po)) continue;
+    // Older compact snapshots lack provenance for multiple receipt/shipment
+    // dates. Reimport the receiving file instead of guessing from its max date.
+    const date = line.lastReceivedDate || ((line.receipts ?? 1) === 1 ? line.date : null);
+    const token = up(line.po);
+    const candidates = compatibleRows(line).filter((row) =>
+      up(row.po) === token || (hasTicket(row.ticketNumber) && up(row.ticketNumber) === token));
+    if (candidates.length !== 1 || !(candidates[0].receivedFifo > 0)) continue;
+    const row = candidates[0];
+    const result = directReceipts.get(row) || { date: null, complete: true };
+    const eventTotal = Array.isArray(line.receiptDates) ? line.receiptDates.reduce((sum, item) => sum + item.received, 0) : null;
+    if (line.undatedReceived || !validDate(date) || (eventTotal != null && eventTotal !== Number(line.received))) result.complete = false;
+    else result.date = latest(result.date, date);
+    directReceipts.set(row, result);
+  }
+  for (const [row, result] of directReceipts) {
+    if (!result.complete || !result.date) continue;
+    row.receiptDate = result.date;
+    row.receiptDateBasis = 'khớp trực tiếp';
+  }
+  // Several POs can share one ticket. When all receipt quantities have dates,
+  // reproduce the same PO FIFO allocation chronologically, noting that the date
+  // is inferred from the ticket rather than explicitly recorded against a PO.
+  const shared = new Map();
+  for (const line of receiptLines) {
+    if (!(Number(line.received) > 0) || !hasTicket(line.po)) continue;
+    const key = `${productOf(line.model, modelCodeOf(line.color))}|${up(line.po)}`;
+    const group = shared.get(key) || { lines: [], rows: [] };
+    group.lines.push(line);
+    shared.set(key, group);
+  }
+  for (const group of shared.values()) {
+    const first = group.lines[0];
+    const token = up(first.po);
+    const productRows = byProduct.get(productOf(first.model, modelCodeOf(first.color))) || [];
+    const candidates = productRows.filter((row) => hasTicket(row.ticketNumber) && up(row.ticketNumber) === token);
+    if (candidates.length < 2 || new Set(candidates.map((row) => row.lotKey)).size !== 1) continue;
+    if (group.lines.some((line) => {
+      const matching = compatibleRows(line).filter((row) => hasTicket(row.ticketNumber) && up(row.ticketNumber) === token);
+      return matching.length !== candidates.length;
+    })) continue;
+    const events = [];
+    let complete = true;
+    for (const line of group.lines) {
+      if (!Number.isSafeInteger(Number(line.received))) { complete = false; break; }
+      if (Array.isArray(line.receiptDates)) {
+        if (line.undatedReceived || line.receiptDates.some((item) => !validDate(item.date) || !Number.isSafeInteger(item.received) || item.received <= 0)
+          || line.receiptDates.reduce((sum, item) => sum + item.received, 0) !== Number(line.received)) { complete = false; break; }
+        events.push(...line.receiptDates);
+      } else if ((line.receipts ?? 1) === 1 && validDate(line.date)) {
+        events.push({ date: line.date, received: Number(line.received) });
+      } else { complete = false; break; }
+    }
+    const needed = candidates.reduce((sum, row) => sum + row.receivedFifo, 0);
+    if (!complete || events.reduce((sum, item) => sum + item.received, 0) < needed) continue;
+    events.sort((a, b) => a.date.localeCompare(b.date));
+    let eventIndex = 0;
+    let eventLeft = events[0]?.received || 0;
+    for (const row of candidates) {
+      let need = row.receivedFifo;
+      while (need > 0 && eventIndex < events.length) {
+        const used = Math.min(need, eventLeft);
+        if (used > 0) {
+          row.receiptDate = events[eventIndex].date;
+          row.receiptDateBasis = 'FIFO theo phiếu';
+        }
+        need -= used;
+        eventLeft -= used;
+        if (!eventLeft) {
+          eventIndex++;
+          eventLeft = events[eventIndex]?.received || 0;
+        }
+      }
+    }
+  }
+  for (const line of deliveryLines) {
+    if (!(Number(line.delivered) > 0 || Number(line.good) > 0) || !validDate(line.actualDeliveryDate)) continue;
+    const compatible = compatibleRows(line).filter((row) => !hasTicket(line.ticket) || !hasTicket(row.ticketNumber) || up(line.ticket) === up(row.ticketNumber));
+    const tokens = [line.fullPo, line.po, String(line.po ?? '').replace(/-(?:OB|TB)$/i, '')].map(up).filter(Boolean);
+    let candidates = [];
+    for (const token of tokens) {
+      candidates = compatible.filter((row) => up(row.po) === token);
+      if (candidates.length) break;
+    }
+    if (candidates.length !== 1) continue;
+    candidates[0].fileDeliveryDate = latest(candidates[0].fileDeliveryDate, line.actualDeliveryDate);
+  }
+}
+
 function statusOf(item) {
   if (item.contract > 0 && item.good >= item.contract) return 'done';
   if (item.received === 0 && item.delivered === 0) return 'waiting';
@@ -273,6 +388,7 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
       row.dayFifo = pourIntoDays(row);
     }
   }
+  assignRowDates(lots, receiptLines, deliveryLines);
 
   const customerNames = new Map(deliveryUnits.map((unit) => [customerKey(unit.customer), unit.customer]));
   const items = lots.map((lot) => finish({

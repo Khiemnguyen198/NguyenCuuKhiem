@@ -1,6 +1,7 @@
 import { escapeHtml, formatNumber } from './format.js';
 import { STATUS_COPY, colorName, customerLogo } from './models-view.js';
 import { sortByUrgency } from './export-workbook.js';
+import { deliveryTiming } from './delivery-timing.js';
 
 // Kế hoạch page: the selected booking week (or day) seen from each file on its own, then the
 // three put together. One "order" is one booking lot (mã hàng + model + mùa + SLHĐ tổng).
@@ -190,10 +191,11 @@ export function renderDeliveryPlanTable(orders) {
       || String(a.row.ref || a.order.model || '').localeCompare(String(b.row.ref || b.order.model || ''), 'vi', { numeric: true })
       || String(a.row.po || '').localeCompare(String(b.row.po || ''), 'vi', { numeric: true }));
   const body = rows.map(({ order, row }) => {
-    const contractDate = row.outputDate || order.dueDate;
-    const actualDate = order.actualDeliveryDate || null;
-    const warning = actualDate ? (contractDate && actualDate > contractDate ? 'Giao trễ hợp đồng' : 'Đã giao') : 'Chưa có ngày thực tế';
-    const actualClass = actualDate ? (contractDate && actualDate > contractDate ? ' plan-date--late' : ' plan-date--actual') : '';
+    const timing = deliveryTiming(row, order);
+    const formatDate = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '—');
+    const warning = timing.warnings.join(' · ') || 'Ngày file giao khớp dự kiến';
+    const expectedClass = timing.expectedDate ? (timing.expectedLate ? ' plan-date--late' : ' plan-date--actual') : '';
+    const fileClass = timing.fileDate ? (timing.fileLate || timing.mismatched ? ' plan-date--late' : ' plan-date--actual') : '';
     return `<tr>
       <td class="delivery-table__left"><strong>${escapeHtml(row.ref || order.model || '—')}</strong></td>
       <td class="delivery-table__left">${escapeHtml(colorName(row.color || order.color) || row.color || order.color || '—')}</td>
@@ -203,14 +205,15 @@ export function renderDeliveryPlanTable(orders) {
       <td>${number(order.contract)}</td>
       <td>${number(row.receivedFifo ?? order.received)}</td>
       <td>${escapeHtml(row.leadTime || order.leadTime || '—')}</td>
-      <td>${shortDate(row.inputDate || firstInput(order))}</td>
-      <td>${shortDate(contractDate)}</td>
-      <td class="${actualClass}">${shortDate(actualDate)}</td>
-      <td><span class="result-pill${actualDate ? '' : ' result-pill--warn'}">${warning}</span></td>
+      <td>${formatDate(timing.receiptDate)}</td>
+      <td>${formatDate(timing.contractDate)}</td>
+      <td class="${fileClass}">${formatDate(timing.fileDate)}</td>
+      <td class="${expectedClass}">${formatDate(timing.expectedDate)}</td>
+      <td><span class="result-pill${timing.warnings.length ? ' result-pill--warn' : ''}">${escapeHtml(warning)}</span></td>
     </tr>`;
-  }).join('') || empty(12, 'Không có dòng booking trong phạm vi đã chọn.');
+  }).join('') || empty(13, 'Không có dòng booking trong phạm vi đã chọn.');
   return `<div class="plan-table-scroll plan-delivery-table-scroll"><table class="delivery-table plan-table plan-delivery-table">
-    <thead><tr><th class="th-left">Mã hàng</th><th class="th-left">Màu</th><th class="th-left">PO</th><th>SS</th><th>SLHĐ</th><th>SLHĐ tổng</th><th>SL BTP nhận</th><th>Leadtime</th><th>Ngày nhận</th><th>Ngày giao hợp đồng</th><th>Ngày giao thực tế</th><th>Cảnh báo</th></tr></thead>
+    <thead><tr><th class="th-left">Mã hàng</th><th class="th-left">Màu</th><th class="th-left">PO</th><th>SS</th><th>SLHĐ</th><th>SLHĐ tổng</th><th>SL BTP nhận</th><th>Leadtime</th><th>Ngày nhận BTP</th><th>Ngày giao hợp đồng</th><th>Ngày giao thực tế (file)</th><th>Ngày giao dự kiến</th><th>Cảnh báo</th></tr></thead>
     <tbody>${body}</tbody>
   </table></div>`;
 }

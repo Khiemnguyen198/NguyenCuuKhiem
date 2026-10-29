@@ -91,7 +91,7 @@ export function compactReceiptLines(lines) {
   const groups = new Map();
   for (const line of lines) {
     const key = [line.model, line.color, line.season, line.po].map((value) => String(value ?? '').trim().toUpperCase()).join('|');
-    const group = groups.get(key) || { ...line, received: 0, shipped: 0, receipts: 0, firstDate: null, date: null };
+    const group = groups.get(key) || { ...line, received: 0, shipped: 0, receipts: 0, firstDate: null, date: null, lastReceivedDate: null, receiptDates: [], undatedReceived: false };
     group.received += line.received || 0;
     group.shipped += line.shipped || 0;
     group.receipts += line.receipts ?? 1;
@@ -100,7 +100,27 @@ export function compactReceiptLines(lines) {
       if (!group.firstDate || date < group.firstDate) group.firstDate = date;
       if (!group.date || date > group.date) group.date = date;
     }
+    // A later shipment-only row is not a later receipt. Preserve the latest
+    // date with actual incoming BTP when the browser compacts the log.
+    const receivedDate = line.lastReceivedDate || ((line.receipts ?? 1) === 1 && line.received > 0 ? line.date : null);
+    if (isIsoDate(receivedDate) && (!group.lastReceivedDate || receivedDate > group.lastReceivedDate)) group.lastReceivedDate = receivedDate;
+    if (line.received > 0) {
+      if (Array.isArray(line.receiptDates)) {
+        const dated = line.receiptDates.filter((item) => isIsoDate(item.date) && Number.isFinite(item.received) && item.received > 0);
+        group.receiptDates.push(...dated);
+        if (line.undatedReceived || dated.reduce((sum, item) => sum + item.received, 0) !== line.received) group.undatedReceived = true;
+      } else if ((line.receipts ?? 1) === 1 && isIsoDate(line.date)) {
+        group.receiptDates.push({ date: line.date, received: line.received });
+      } else {
+        group.undatedReceived = true;
+      }
+    }
     groups.set(key, group);
   }
-  return [...groups.values()].map(({ table, contractQuantity, ...line }) => line);
+  return [...groups.values()].map(({ table, contractQuantity, ...line }) => {
+    const byDate = new Map();
+    for (const item of line.receiptDates) byDate.set(item.date, (byDate.get(item.date) || 0) + item.received);
+    line.receiptDates = [...byDate].sort(([a], [b]) => a.localeCompare(b)).map(([date, received]) => ({ date, received }));
+    return line;
+  });
 }

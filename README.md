@@ -129,3 +129,9 @@ Thư viện Excel dùng alias ghim `xlsx: npm:@e965/xlsx@0.20.3`, bản đóng g
 Chạy `npm test`, `npm run build`, `npm run build:desktop`, `npm audit --audit-level=high`. Kiểm thử trình duyệt dùng `python test/browser-regression.py` sau khi cài Python Playwright và Chromium; đặt `CHROMIUM_EXECUTABLE` nếu cần chỉ định executable. Test dùng database tạm, không ghi vào dữ liệu đang dùng.
 
 Các bản nhập cũ từng sai ngày hoặc bị chuyển số lỗi thành 0 không thể tự khôi phục từ database; hãy nhập lại workbook gốc. Bản sửa không tự thay đổi ngày của lịch sử đã lưu.
+
+## Ngày giao trong kế hoạch
+
+Trong bảng kế hoạch và sheet `KE HOACH GIAO HANG`, **Ngày nhận** là ngày nhận BTP được đối chiếu từ file nhận, không phải ngày INPUT ghi trên booking. Ngày giao dự kiến được tính từ ngày nhận BTP cộng leadtime của từng dòng và thêm một ngày làm việc cho tất cả leadtime. Bắt đầu đếm từ ngày sau ngày nhận, làm việc từ thứ Hai đến thứ Bảy, bỏ Chủ nhật. Ví dụ: nhận thứ Sáu, leadtime 1 ngày → dự kiến giao thứ Hai.
+
+Ngày giao thực tế là ngày từ file giao đã đối chiếu được với PO; ứng dụng giữ riêng ngày dự kiến và ngày theo file, cảnh báo khi hai ngày khác nhau hoặc trễ hạn hợp đồng. Khi nhiều PO dùng chung một phiếu, nếu đủ dữ liệu nhận theo ngày thì ngày nhận cuối được phân bổ FIFO và ghi rõ trong cảnh báo; trường hợp không đủ thông tin để ghép ngày nhận hoặc ngày giao cho đúng PO, ô tương ứng để trống và có cảnh báo. Dữ liệu ngày và số lượng được lấy từ file đã nhập; ứng dụng không chỉnh sửa file nguồn.

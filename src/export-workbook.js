@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import { STATUS_COPY, colorName } from './models-view.js';
 import { dailyLoad } from './booking-import.js';
 import { ISSUE_GROUPS, sheetIssueList } from './check-view.js';
+import { deliveryTiming } from './delivery-timing.js';
 
 const pad = (value) => String(value).padStart(2, '0');
 
@@ -272,8 +273,8 @@ export function buildIssuesWorkbook(sheetCheck, filename = '') {
 
 const DELIVERY_PLAN_COLUMNS = [
   ['MÃ HÀNG', 14], ['MÀU', 26], ['PO', 15], ['SS', 8], ['SLHĐ', 10], ['SLHĐ TỔNG', 12],
-  ['SL BTP NHẬN', 13], ['LEADTIME', 10], ['NGÀY NHẬN', 12], ['NGÀY GIAO HỢP ĐỒNG', 18],
-  ['NGÀY GIAO THỰC TẾ', 18], ['CẢNH BÁO', 24]
+  ['SL BTP NHẬN', 13], ['LEADTIME', 10], ['NGÀY NHẬN', 16], ['NGÀY GIAO HỢP ĐỒNG', 18],
+  ['NGÀY GIAO THỰC TẾ', 18], ['NGÀY GIAO DỰ KIẾN', 20], ['CẢNH BÁO', 48]
 ];
 const actualDateStyle = { fill: { fgColor: { rgb: 'FFF2CC' } }, font: { bold: true, color: { rgb: '7F6000' } } };
 const lateDateStyle = { fill: { fgColor: { rgb: 'F4CCCC' } }, font: { bold: true, color: { rgb: '9C0006' } } };
@@ -288,14 +289,14 @@ function deliveryPlanSheet({ booking, lots = [] }) {
       || String(a.row.po || '').localeCompare(String(b.row.po || ''), 'vi', { numeric: true }));
   const table = [DELIVERY_PLAN_COLUMNS.map(([title]) => title)];
   ordered.forEach(({ row, lot }) => {
-    const actual = lot?.actualDeliveryDate || null;
-    const contract = row.outputDate || lot?.dueDate || null;
-    const warning = actual ? (contract && actual > contract ? 'Giao trễ hạn hợp đồng' : 'Đã có ngày giao thực tế') : 'Chưa có ngày giao thực tế';
+    const timing = deliveryTiming(row, lot);
+    const warning = timing.warnings.join(' · ') || 'Ngày file giao khớp dự kiến';
     table.push([
       row.ref || '', colorName(row.color) || row.color || '', row.po || '', row.season || '',
       numberCell(row.lineQuantity), numberCell(lot?.contract ?? row.contractQuantity ?? 0),
-      numberCell(row.receivedFifo ?? 0), row.leadTime || '', dateCell(row.inputDate, 'dd/mm/yyyy'),
-      dateCell(contract, 'dd/mm/yyyy'), dateCell(actual, 'dd/mm/yyyy'), warning
+      numberCell(row.receivedFifo ?? 0), row.leadTime || '', dateCell(timing.receiptDate, 'dd/mm/yyyy'),
+      dateCell(timing.contractDate, 'dd/mm/yyyy'), dateCell(timing.fileDate, 'dd/mm/yyyy'),
+      dateCell(timing.expectedDate, 'dd/mm/yyyy'), warning
     ]);
   });
   if (!ordered.length) table.push(['Không có dữ liệu booking trong phạm vi đã chọn.']);
@@ -303,10 +304,11 @@ function deliveryPlanSheet({ booking, lots = [] }) {
   sheet['!cols'] = DELIVERY_PLAN_COLUMNS.map(([, wch]) => ({ wch }));
   sheet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(0, table.length - 1), c: DELIVERY_PLAN_COLUMNS.length - 1 } }) };
   ordered.forEach(({ row, lot }, index) => {
-    const actual = lot?.actualDeliveryDate || null;
-    if (!actual) return;
-    const address = cellAddress(index + 1, 10);
-    if (sheet[address]) sheet[address].s = row.outputDate && actual > row.outputDate ? lateDateStyle : actualDateStyle;
+    const timing = deliveryTiming(row, lot);
+    const fileAddress = cellAddress(index + 1, 10);
+    const expectedAddress = cellAddress(index + 1, 11);
+    if (sheet[expectedAddress]) sheet[expectedAddress].s = timing.expectedLate ? lateDateStyle : actualDateStyle;
+    if (sheet[fileAddress]) sheet[fileAddress].s = timing.fileLate || timing.mismatched ? lateDateStyle : actualDateStyle;
   });
   return sheet;
 }

@@ -41,7 +41,7 @@
       "!src/**/*.test.js"
     ],
     "mac": {
-      "icon": "public/inkava-logo.png",
+      "icon": "public/inkava-icon-mac.png",
       "target": [
         {
           "target": "dmg",
