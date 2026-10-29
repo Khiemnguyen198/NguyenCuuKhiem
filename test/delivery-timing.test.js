@@ -5,14 +5,14 @@ import { expectedDeliveryDate, leadTimeDays, deliveryTiming } from '../src/deliv
 import { renderDeliveryPlanTable } from '../src/plan-results.js';
 import { buildExportWorkbook } from '../src/export-workbook.js';
 
-test('adds one working day for every leadtime, excluding Sundays', () => {
-  const expected = { 1: '2026-10-28', 2: '2026-10-29', 3: '2026-10-30', 4: '2026-10-31', 5: '2026-11-02', 7: '2026-11-04' };
+test('adds leadtime plus one calendar day, including Sundays', () => {
+  const expected = { 1: '2026-10-28', 2: '2026-10-29', 3: '2026-10-30', 4: '2026-10-31', 5: '2026-11-01', 7: '2026-11-03' };
   for (const [lead, date] of Object.entries(expected)) assert.equal(expectedDeliveryDate('2026-10-26', `${lead} ngày`), date);
-  assert.equal(expectedDeliveryDate('2026-10-30', '1 NGÀY'), '2026-11-02');
-  assert.equal(expectedDeliveryDate('2026-10-31', '1 ngày'), '2026-11-03');
+  assert.equal(expectedDeliveryDate('2026-10-30', '1 NGÀY'), '2026-11-01');
+  assert.equal(expectedDeliveryDate('2026-10-31', '1 ngày'), '2026-11-02');
   assert.equal(expectedDeliveryDate('2026-11-01', '1 ngày'), '2026-11-03');
   assert.equal(expectedDeliveryDate('2026-12-31', '1 ngày'), '2027-01-02');
-  assert.equal(expectedDeliveryDate('2026-12-31', '5 ngày'), '2027-01-07');
+  assert.equal(expectedDeliveryDate('2026-12-31', '5 ngày'), '2027-01-06');
 });
 
 test('rejects absent/invalid input without generating a fake date', () => {
@@ -26,17 +26,19 @@ test('rejects absent/invalid input without generating a fake date', () => {
 test('distinguishes forecast, actual file date, contract and independent warnings', () => {
   const row = { receiptDate: '2026-10-26', leadTime: '1 ngày', fileDeliveryDate: '2026-10-30', outputDate: '2026-10-29' };
   const result = deliveryTiming(row);
-  assert.deepEqual([result.receiptDate, result.expectedDate, result.fileDate, result.contractDate], ['2026-10-26', '2026-10-28', '2026-10-30', '2026-10-29']);
-  assert.equal(result.mismatched, true);
-  assert.equal(result.expectedLate, false);
+  assert.deepEqual([result.receiptDate, result.expectedDate, result.fileDate, result.contractDate], ['2026-10-26', '2026-11-01', '2026-10-30', '2026-10-29']);
+  assert.equal(result.expectedLate, true);
   assert.equal(result.fileLate, true);
-  assert.deepEqual(result.warnings, ['Ngày file giao khác ngày dự kiến', 'Ngày file giao trễ hạn hợp đồng']);
+  assert.deepEqual(result.warnings, ['Dự kiến trễ hạn hợp đồng', 'Ngày file giao trễ hạn hợp đồng']);
   const noReceipt = deliveryTiming({ inputDate: '2026-10-26', outputDate: '2026-10-27', leadTime: '1 ngày', fileDeliveryDate: '2026-10-28' }, { lastReceiptDate: '2026-10-26', actualDeliveryDate: '2026-10-29' });
   assert.equal(noReceipt.receiptDate, null);
-  assert.equal(noReceipt.expectedDate, null);
+  assert.equal(noReceipt.expectedDate, '2026-10-30');
   assert.equal(noReceipt.fileDate, '2026-10-28');
   assert.ok(noReceipt.warnings.includes('Chưa xác định ngày nhận BTP'));
-  assert.equal(deliveryTiming({ receiptDate: '2026-10-26', leadTime: '1 ngày' }).fileDate, null);
+  const noFile = deliveryTiming({ receiptDate: '2026-10-26', leadTime: '1 ngày' });
+  assert.equal(noFile.fileDate, null);
+  assert.equal(noFile.expectedDate, null);
+  assert.ok(noFile.warnings.includes('Chưa có ngày giao theo file'));
   const fifo = deliveryTiming({ receiptDate: '2026-10-26', leadTime: '1 ngày', receiptDateBasis: 'FIFO theo phiếu' });
   assert.ok(!fifo.warnings.some(warning => warning.includes('FIFO')));
   const missingLead = deliveryTiming({ receiptDate: '2026-10-26' }, { leadTime: '1 ngày', dueDate: '2026-10-28' });
@@ -54,15 +56,15 @@ test('screen and serialized delivery workbook show the same separate dates and w
   assert.match(html, /Ngày giao dự kiến/);
   assert.match(html, /26\/10\/2026/);
   assert.match(html, /30\/10\/2026/);
-  assert.match(html, /28\/10\/2026/);
-  assert.match(html, /Ngày file giao khác ngày dự kiến/);
+  assert.match(html, /01\/11\/2026/);
+  assert.match(html, /Dự kiến trễ hạn hợp đồng/);
   const book = buildExportWorkbook({ booking: { rows: [row], days: [] }, lots: [lot] });
   const bytes = XLSX.write(book, { type: 'buffer', bookType: 'xlsx' });
   const sheet = XLSX.read(bytes, { type: 'buffer', cellDates: false }).Sheets['KE HOACH GIAO HANG'];
   assert.deepEqual(['I1','J1','K1','L1','M1','N1'].map((key) => sheet[key].v), ['NGÀY NHẬN BTP (BOOKING)','NGÀY GIAO BTP (BOOKING)','NGÀY NHẬN BTP THỰC TẾ','NGÀY GIAO BTP THỰC TẾ','NGÀY GIAO DỰ KIẾN','CẢNH BÁO']);
   const excelSerial = (iso) => (Date.parse(`${iso}T00:00:00Z`) - Date.UTC(1899,11,30)) / 86400000;
-  assert.deepEqual(['I2','J2','K2','L2','M2'].map((key) => sheet[key].v), ['2026-10-24','2026-10-29','2026-10-26','2026-10-30','2026-10-28'].map(excelSerial));
-  assert.match(sheet.N2.v, /Ngày file giao khác ngày dự kiến/);
+  assert.deepEqual(['I2','J2','K2','L2','M2'].map((key) => sheet[key].v), ['2026-10-24','2026-10-29','2026-10-26','2026-10-30','2026-11-01'].map(excelSerial));
+  assert.match(sheet.N2.v, /Dự kiến trễ hạn hợp đồng/);
   assert.match(sheet.N2.v, /Ngày file giao trễ hạn hợp đồng/);
 });
 

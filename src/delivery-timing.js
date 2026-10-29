@@ -1,4 +1,4 @@
-// The factory works Monday–Saturday. Dates are calendar days, not timestamps.
+// Forecasts use calendar days, including Sundays.
 const DAY_MS = 86_400_000;
 
 function calendarDate(value) {
@@ -16,24 +16,12 @@ export function leadTimeDays(value) {
   return Number.isSafeInteger(days) && days > 0 && days < Number.MAX_SAFE_INTEGER ? days : null;
 }
 
-// Start counting on the day after receipt, skip Sundays, and add one extra workday
-// to every supported lead time. Unknown inputs never become a fabricated date.
-export function expectedDeliveryDate(receiptDate, leadTime) {
-  const date = calendarDate(receiptDate);
+// Actual delivery date plus leadtime and one calendar day.
+export function expectedDeliveryDate(fileDeliveryDate, leadTime) {
+  const date = calendarDate(fileDeliveryDate);
   const leadDays = leadTimeDays(leadTime);
   if (!date || leadDays == null) return null;
-  let remaining = leadDays + 1;
-  // Count the first workday explicitly, which also handles receipt on Sunday.
-  date.setTime(date.getTime() + DAY_MS);
-  if (date.getUTCDay() === 0) date.setTime(date.getTime() + DAY_MS);
-  remaining -= 1;
-  const weeks = Math.floor(remaining / 6);
-  date.setTime(date.getTime() + weeks * 7 * DAY_MS);
-  remaining %= 6;
-  while (remaining > 0 && Number.isFinite(date.getTime())) {
-    date.setTime(date.getTime() + DAY_MS);
-    if (date.getUTCDay() !== 0) remaining -= 1;
-  }
+  date.setTime(date.getTime() + (leadDays + 1) * DAY_MS);
   if (!Number.isFinite(date.getTime()) || date.getUTCFullYear() > 9999) return null;
   return date.toISOString().slice(0, 10);
 }
@@ -45,22 +33,20 @@ const validDate = (value) => calendarDate(value) ? value : null;
 export function deliveryTiming(row, order = {}) {
   const receiptDate = validDate(row.receiptDate);
   const leadTime = row.leadTime || '';
-  const expectedDate = expectedDeliveryDate(receiptDate, leadTime);
   const fileDate = validDate(row.fileDeliveryDate);
+  const expectedDate = expectedDeliveryDate(fileDate, leadTime);
   const bookingReceiptDate = validDate(row.inputDate);
   const contractDate = validDate(row.bookingOutputDate ?? row.outputDate ?? (row === order ? row.dueDate : null));
-  const mismatched = Boolean(fileDate && expectedDate && fileDate !== expectedDate);
   const expectedLate = Boolean(expectedDate && contractDate && expectedDate > contractDate);
   const fileLate = Boolean(fileDate && contractDate && fileDate > contractDate);
   const warnings = [];
   if (!receiptDate) warnings.push('Chưa xác định ngày nhận BTP');
-  else if (leadTimeDays(leadTime) == null) warnings.push('Leadtime không hợp lệ');
-  else if (!expectedDate) warnings.push('Không tính được ngày giao dự kiến');
+  if (leadTimeDays(leadTime) == null) warnings.push('Leadtime không hợp lệ');
+  else if (fileDate && !expectedDate) warnings.push('Không tính được ngày giao dự kiến');
   if (receiptDate && validDate(row.inputDate) && receiptDate < row.inputDate) warnings.push('Ngày nhận trước INPUT booking: cần kiểm tra');
   if (!fileDate) warnings.push('Chưa có ngày giao theo file');
   else if (row.fileDeliveryDateBasis === 'Ngày xuất file nhận') warnings.push('Ngày giao từ cột NGÀY XUẤT file nhận');
-  if (mismatched) warnings.push('Ngày file giao khác ngày dự kiến');
   if (expectedLate) warnings.push('Dự kiến trễ hạn hợp đồng');
   if (fileLate) warnings.push('Ngày file giao trễ hạn hợp đồng');
-  return { bookingReceiptDate, receiptDate, expectedDate, fileDate, contractDate, mismatched, expectedLate, fileLate, warnings };
+  return { bookingReceiptDate, receiptDate, expectedDate, fileDate, contractDate, expectedLate, fileLate, warnings };
 }

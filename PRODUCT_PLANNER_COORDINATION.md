@@ -75,8 +75,8 @@ Always pull `master` before editing. Do not treat the GPT Sites deployment as th
 
 ## Delivery-date calculation
 
-- Delivery planning adds one working day to each row's lead time, counting from the day after the matched BTP receipt. The factory calendar is Monday–Saturday, skipping Sundays.
-- Show the calculated expected date separately from the delivery-file date and the booking contract deadline; flag differences and late dates. A forecast is not proof that a delivery occurred.
+- The expected delivery date is the matched actual BTP delivery date plus lead time and one calendar day, including Sundays; leave it blank without a valid actual date.
+- Show the calculated expected date separately from the delivery-file date and the booking contract deadline; flag late dates. A forecast is not proof that a delivery occurred.
 - Only attach receipt/delivery dates to a PO when source identification and allocation support it; leave ambiguous dates blank with a warning. Never substitute booking INPUT for an actual BTP receipt date.
 - The TH contract export includes BTP receipt date and matching provenance next to received quantity. Only use dates linked by PO or ticket; product/season pooling alone cannot establish a PO receipt date. For a shared ticket, inferred events before that PO’s booking INPUT are left blank; direct early matches stay visible with a warning. Unknown or incomplete dates remain empty.
 

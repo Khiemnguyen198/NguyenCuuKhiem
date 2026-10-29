@@ -93,9 +93,9 @@ def check_mode(browser, url, directory, label):
     upload(page,directory,'deliveries','deliveries.xlsx')
     page.locator('.nav__item[data-page="Kế hoạch"]').click()
     expect(page.locator('#planTable')).to_contain_text('PO-1')
-    # Friday + (1+1) working days = Monday; Saturday + (2+1) = Wednesday.
-    assert 'khác' in assert_cells(page,'PO-1','30/10/2026','04/11/2026','02/11/2026').lower()
-    assert 'khác' not in assert_cells(page,'PO-2','31/10/2026','04/11/2026','04/11/2026').lower()
+    # Actual delivery 04/11 + leadtime + 1 calendar day.
+    assert 'khác' not in assert_cells(page,'PO-1','30/10/2026','04/11/2026','06/11/2026').lower()
+    assert 'khác' not in assert_cells(page,'PO-2','31/10/2026','04/11/2026','07/11/2026').lower()
     assert_cells(page,'PO-3','—','—','—')
     page.locator('#exportFab').click()
     with page.expect_download(timeout=15000) as download_info:
@@ -108,9 +108,9 @@ def check_mode(browser, url, directory, label):
     assert rows['PO-1']['NGÀY GIAO BTP (BOOKING)']=='2026-11-09',rows
     assert rows['PO-1']['NGÀY NHẬN BTP THỰC TẾ']=='2026-10-30',rows
     assert rows['PO-1']['NGÀY GIAO BTP THỰC TẾ']=='2026-11-04',rows
-    assert rows['PO-1']['NGÀY GIAO DỰ KIẾN']=='2026-11-02',rows
-    assert 'khác' in rows['PO-1']['CẢNH BÁO'].lower(),rows
-    assert rows['PO-2']['NGÀY GIAO DỰ KIẾN']=='2026-11-04',rows
+    assert rows['PO-1']['NGÀY GIAO DỰ KIẾN']=='2026-11-06',rows
+    assert 'khác' not in rows['PO-1']['CẢNH BÁO'].lower(),rows
+    assert rows['PO-2']['NGÀY GIAO DỰ KIẾN']=='2026-11-07',rows
     assert 'khác' not in rows['PO-2']['CẢNH BÁO'].lower(),rows
     assert rows['PO-3']['NGÀY NHẬN BTP THỰC TẾ'] is None and rows['PO-3']['NGÀY GIAO DỰ KIẾN'] is None,rows
     assert not errors,errors

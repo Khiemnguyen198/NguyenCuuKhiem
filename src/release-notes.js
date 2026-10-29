@@ -2,6 +2,10 @@ import { escapeHtml } from './format.js';
 
 // Bundle notes with their version so they remain accurate and available offline.
 const RELEASE_NOTES = {
+  '0.0.23': [
+    'Tính ngày giao dự kiến từ ngày giao BTP thực tế + leadtime + 1 ngày lịch, kể cả Chủ nhật.',
+    'Để trống ngày dự kiến khi chưa có ngày giao BTP thực tế.'
+  ],
   '0.0.22': [
     'Sửa ngày nhận BTP cũ bị ghép nhầm vào hợp đồng mới.',
     'Cập nhật đường dẫn kho Inkava-Planner và chức năng kiểm tra phiên bản.'

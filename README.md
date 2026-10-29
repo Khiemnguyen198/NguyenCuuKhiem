@@ -7,7 +7,7 @@ Phần mềm đối chiếu booking với tình hình nhận, in và giao bán t
 - Nhập file booking, file nhận BTP và file giao từ máy hoặc link được phép tải.
 - Theo dõi số lượng, tiến độ và hạn giao theo mã hàng, PO, tuần hoặc ngày.
 - Kiểm tra dữ liệu booking, đối chiếu thay đổi và cảnh báo đơn cần xử lý.
-- Tính ngày giao dự kiến từ **ngày nhận BTP + leadtime + 1 ngày làm việc**; nhà máy làm việc từ thứ Hai đến thứ Bảy.
+- Tính ngày giao dự kiến từ **ngày giao BTP thực tế + leadtime + 1 ngày lịch** (bao gồm Chủ nhật).
 - Xuất Excel gồm kế hoạch giao hàng, hợp đồng `TH` và bảng cân đối. Bốn cột chính thể hiện ngày nhận/giao trong booking (INPUT/OUTPUT) và ngày nhận/giao thực tế từ file công ty; ngày chưa đủ căn cứ được để trống.
 
 ## Bắt đầu sử dụng

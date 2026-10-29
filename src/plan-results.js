@@ -193,9 +193,9 @@ export function renderDeliveryPlanTable(orders) {
   const body = rows.map(({ order, row }) => {
     const timing = deliveryTiming(row, order);
     const formatDate = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '—');
-    const warning = timing.warnings.join(' · ') || 'Ngày file giao khớp dự kiến';
+    const warning = timing.warnings.join(' · ') || 'Không có cảnh báo';
     const expectedClass = timing.expectedDate ? (timing.expectedLate ? ' plan-date--late' : ' plan-date--actual') : '';
-    const fileClass = timing.fileDate ? (timing.fileLate || timing.mismatched ? ' plan-date--late' : ' plan-date--actual') : '';
+    const fileClass = timing.fileDate ? (timing.fileLate ? ' plan-date--late' : ' plan-date--actual') : '';
     return `<tr>
       <td class="delivery-table__left"><strong>${escapeHtml(row.ref || order.model || '—')}</strong></td>
       <td class="delivery-table__left">${escapeHtml(colorName(row.color || order.color) || row.color || order.color || '—')}</td>

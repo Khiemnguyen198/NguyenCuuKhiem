@@ -298,7 +298,7 @@ function deliveryPlanSheet({ booking, lots = [] }) {
   const table = [DELIVERY_PLAN_COLUMNS.map(([title]) => title)];
   ordered.forEach(({ row, lot }) => {
     const timing = deliveryTiming(row, lot);
-    const warning = timing.warnings.join(' · ') || 'Ngày file giao khớp dự kiến';
+    const warning = timing.warnings.join(' · ') || 'Không có cảnh báo';
     table.push([
       row.ref || '', colorName(row.color) || row.color || '', row.po || '', row.season || '',
       numberCell(row.lineQuantity), numberCell(lot?.contract ?? row.contractQuantity ?? 0),
@@ -316,7 +316,7 @@ function deliveryPlanSheet({ booking, lots = [] }) {
     const fileAddress = cellAddress(index + 1, 11);
     const expectedAddress = cellAddress(index + 1, 12);
     if (sheet[expectedAddress]) sheet[expectedAddress].s = timing.expectedLate ? lateDateStyle : actualDateStyle;
-    if (sheet[fileAddress]) sheet[fileAddress].s = timing.fileLate || timing.mismatched ? lateDateStyle : actualDateStyle;
+    if (sheet[fileAddress]) sheet[fileAddress].s = timing.fileLate ? lateDateStyle : actualDateStyle;
   });
   return sheet;
 }
