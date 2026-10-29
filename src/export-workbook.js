@@ -223,6 +223,9 @@ function canDoiSheet({ booking, lots }) {
   });
   if (!ordered.length) table.push(['Không có lô nào trong tuần đã chọn.']);
   const sheet = XLSX.utils.aoa_to_sheet(table);
+  // Keep the planner's used range starting with totals on row 3. Newer
+  // SheetJS versions include the leading empty arrays in aoa_to_sheet's range.
+  sheet['!ref'] = XLSX.utils.encode_range({ s: { r: 2, c: 0 }, e: { r: table.length - 1, c: header.length - 1 } });
   sheet['!cols'] = [...CAN_DOI_COLUMNS.map(([, wch]) => ({ wch })), ...days.map(() => ({ wch: 11 }))];
   sheet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 3, c: 1 }, e: { r: Math.max(3, table.length - 1), c: header.length - 1 } }) };
   return sheet;

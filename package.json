@@ -11,14 +11,15 @@
     "build:desktop": "vite build --mode desktop --outDir dist-desktop --emptyOutDir",
     "desktop": "npm run build:desktop && electron .",
     "dist:mac": "npm run build:desktop && electron-builder --mac dmg --arm64 --x64",
-    "dist:win": "npm run build:desktop && electron-builder --win nsis --x64"
+    "dist:win": "npm run build:desktop && electron-builder --win nsis --x64",
+    "test:e2e": "python test/browser-regression.py"
   },
   "dependencies": {
     "@phosphor-icons/web": "^2.1.2",
-    "xlsx": "^0.18.5"
+    "xlsx": "npm:@e965/xlsx@0.20.3"
   },
   "devDependencies": {
-    "electron": "44.7.1",
+    "electron": "44.10.0",
     "electron-builder": "26.17.0",
     "vite": "^7.1.12"
   },
@@ -79,5 +80,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/Khiemnguyen198/NguyenCuuKhiem.git"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

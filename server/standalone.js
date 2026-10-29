@@ -13,7 +13,7 @@ const TYPES = {
 
 export function createAppServer({ staticDir, dataDirectory, port = 0 }) {
   const routes = [];
-  registerApi((prefix, handler) => routes.push([prefix, handler]), { dataDirectory });
+  const closeDatabase = registerApi((prefix, handler) => routes.push([prefix, handler]), { dataDirectory });
 
   const serveFile = async (request, response) => {
     const path = decodeURIComponent(new URL(request.url, 'http://local').pathname);
@@ -44,6 +44,8 @@ export function createAppServer({ staticDir, dataDirectory, port = 0 }) {
       response.end(JSON.stringify({ error: error.message }));
     });
   });
+
+  server.once('close', closeDatabase);
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);

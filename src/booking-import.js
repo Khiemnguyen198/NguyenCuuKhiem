@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import { productKey } from './keys.js';
 import { canonicalHeader, isBookingHeader, repairBookingRows } from './booking-columns.js';
+import { bookingNumber, normalizeBookingDate, validateBookingRows } from './booking-validation.js';
 
 const LEAD_TIME_SHEETS = [
   ['LEADTIME 1 NGÀY', '1 ngày'],
@@ -9,29 +10,10 @@ const LEAD_TIME_SHEETS = [
   ['LEADTIME 5 NGÀY', '5 ngày']
 ];
 
-const pad = (value) => String(value).padStart(2, '0');
-
-const DAY_MS = 86_400_000;
-const EXCEL_EPOCH = Date.UTC(1899, 11, 30);
-
 // Excel dates arrive as day serials. Converting them in UTC avoids the
 // timezone shift of SheetJS `cellDates`, which moves dates back one day in UTC+7.
 export function toIsoDate(value) {
-  if (value == null || value === '') return null;
-  if (typeof value === 'number') {
-    const date = new Date(EXCEL_EPOCH + Math.round(value * DAY_MS));
-    return Number.isNaN(date.getTime()) ? String(value) : date.toISOString().slice(0, 10);
-  }
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
-  }
-  const text = String(value).trim();
-  const vietnamese = text.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
-  if (vietnamese) return `${vietnamese[3]}-${pad(vietnamese[2])}-${pad(vietnamese[1])}`;
-  const ymd = text.match(/^(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})(?:[T\s].*)?$/);
-  if (ymd) return `${ymd[1]}-${pad(ymd[2])}-${pad(ymd[3])}`;
-  const date = new Date(text);
-  return Number.isNaN(date.getTime()) ? text : `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  return normalizeBookingDate(value);
 }
 
 export const label = (cell) => String(cell ?? '').replace(/\s+/g, ' ').trim().toUpperCase();
@@ -63,7 +45,7 @@ export function dailyLoad(rows, days) {
 // Daily plan columns: a label column holds PXC CHUYỂN / PXI TRẢ / TỔNG TUẦN / TỔNG NGÀY on
 // separate rows (above or below the header, depending on the sheet); every column to its
 // right whose PXC cell is a date is one planned day.
-export function readDayColumns(table) {
+export function readDayColumns(table, sheetName = '') {
   const rows = {};
   let labelColumn = -1;
   table.slice(0, 15).forEach((cells, rowIndex) => cells.forEach((cell, column) => {
@@ -80,26 +62,29 @@ export function readDayColumns(table) {
     const pickup = table[rows.pickup][column];
     if (typeof pickup !== 'number') continue;
     const fileTotal = rows.day == null ? null : table[rows.day][column];
-    days.push({
+    try { days.push({
       column,
       date: toIsoDate(pickup),
       returnDate: rows.return == null ? null : toIsoDate(table[rows.return][column]) || null,
-      fileTotal: typeof fileTotal === 'number' ? fileTotal : null,
+      fileTotal: typeof fileTotal === 'number' ? bookingNumber(fileTotal, 'TỔNG NGÀY') : null,
       // Sheet rows of the PXI TRẢ and TỔNG NGÀY labels, for pointing at a wrong cell.
       pickupRow: rows.pickup,
       returnRow: rows.return ?? null,
       totalRow: rows.day ?? null
-    });
+    }); } catch (error) {
+      error.message = `${sheetName ? `Sheet "${sheetName}", ` : ''}cột ${XLSX.utils.encode_col(column)}, ngày PXC/PXI: ${error.message}`;
+      throw error;
+    }
   }
   return days;
 }
 
 function readRowsFromSheet(sheet, fallbackRange, leadTimeOverride = null, sheetName = '') {
   // Array mode keeps every row aligned with the daily plan columns.
-  const table = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true, blankrows: true });
+  const table = XLSX.utils.sheet_to_json(sheet, { header: 1, range: 0, defval: null, raw: true, blankrows: true });
   const headerIndex = findHeaderRow(table, fallbackRange);
   const headers = bookingHeaders(table[headerIndex]);
-  const days = readDayColumns(table);
+  const days = readDayColumns(table, sheetName);
   const dayColumns = new Set(days.map((day) => day.column));
   const rows = [];
   for (const [offset, cells] of table.slice(headerIndex + 1).entries()) {
@@ -109,9 +94,10 @@ function readRowsFromSheet(sheet, fallbackRange, leadTimeOverride = null, sheetN
     });
     const filled = (value) => value != null && value !== '';
     if (label(row.LINE) === 'LINE' || label(row.PO) === 'PO') continue;
+    if (/^(TỔNG|TỔNG CỘNG|TOTAL|SUBTOTAL|GRAND TOTAL)$/.test(label(row.LINE)) && ![row.PO, row.REF, row['MODEL CODE']].some(filled)) continue;
     // A booking line has a REF or a model next to a PO or a quantity. A missing LINE alone
     // no longer drops the row (it used to vanish from the booking without a word).
-    if (!filled(row.LINE) && !(filled(row.REF) || filled(row['MODEL CODE']))) continue;
+    if (![row.LINE, row.PO, row.REF, row['MODEL CODE']].some(filled)) continue;
     if (![row.PO, row.REF, row['MODEL CODE'], row['LINE QTY']].some(filled)) continue;
     // Keyed by day position, not date: the sheet sometimes repeats a date in two columns.
     const allocations = {};
@@ -127,14 +113,14 @@ function readRowsFromSheet(sheet, fallbackRange, leadTimeOverride = null, sheetN
       color: String(row.COLOR ?? ''),
       po: String(row.PO ?? ''),
       season: String(row.SS ?? ''),
-      lineQuantity: Number(row['LINE QTY'] || 0),
-      inputDate: toIsoDate(row.INPUT),
-      outputDate: toIsoDate(row.OUTPUT),
+      lineQuantity: row['LINE QTY'],
+      inputDate: row.INPUT,
+      outputDate: row.OUTPUT,
       modelCode: String(row['MODEL CODE'] ?? ''),
       ticketNumber: String(row['SỐ PHIẾU'] ?? ''),
-      contractQuantity: Number(row['SLHĐ TỔNG']) || null,
+      contractQuantity: row['SLHĐ TỔNG'] ?? null,
       planner: String(row['KẾ HOẠCH'] ?? ''),
-      printCount: Number(row['HÌNH IN'] || 0),
+      printCount: row['HÌNH IN'],
       leadTime: String(row.Leadtime ?? leadTimeOverride ?? ''),
       allocations,
       // Where the row sits, for repair notes; the plain cells let a repair find a value that
@@ -168,12 +154,17 @@ export function getSheetKey(workbook, targetName) {
 
 // TH is assembled by hand from the four lead-time sheets, so compare them before trusting TH.
 export function crossCheckSheets(workbook) {
+  const checkedSheet = (...args) => {
+    const part = readRowsFromSheet(...args);
+    repairBookingRows(part.rows);
+    return { ...part, rows: validateBookingRows(part.rows) };
+  };
   const thSheet = getSheetByName(workbook, 'TH');
   const leadTimeSheets = LEAD_TIME_SHEETS
-    .map(([sheetName, leadTime]) => [getSheetByName(workbook, sheetName), leadTime])
+    .map(([sheetName, leadTime]) => [getSheetByName(workbook, sheetName), leadTime, getSheetKey(workbook, sheetName)])
     .filter(([sheet]) => Boolean(sheet));
   if (!thSheet) return { checked: false, mismatches: [], dailyTotals: [] };
-  if (!leadTimeSheets.length) return { checked: true, mismatches: [], dailyTotals: checkDailyTotals(readRowsFromSheet(thSheet, 4)) };
+  if (!leadTimeSheets.length) return { checked: true, mismatches: [], dailyTotals: checkDailyTotals(checkedSheet(thSheet, 4, null, getSheetKey(workbook, 'TH'))) };
   const key = (row) => [row.po, row.ref, row.color, row.leadTime].map((value) => String(value ?? '').trim().toUpperCase()).join('|');
   const totals = (rows) => rows.reduce((map, row) => {
     const entry = map.get(key(row)) || { row, quantity: 0 };
@@ -181,8 +172,8 @@ export function crossCheckSheets(workbook) {
     map.set(key(row), entry);
     return map;
   }, new Map());
-  const summary = totals(readRowsFromSheet(thSheet, 4).rows);
-  const sources = totals(leadTimeSheets.flatMap(([sheet, leadTime]) => readRowsFromSheet(sheet, 3, leadTime).rows));
+  const summary = totals(checkedSheet(thSheet, 4, null, getSheetKey(workbook, 'TH')).rows);
+  const sources = totals(leadTimeSheets.flatMap(([sheet, leadTime, sheetName]) => checkedSheet(sheet, 3, leadTime, sheetName).rows));
   const mismatches = [];
   const label = (entry, note) => ({ row: entry.row.line ? `LINE ${entry.row.line}` : '—', po: entry.row.po || 'Chưa có PO', ref: entry.row.ref, quantity: entry.quantity, note });
   for (const [rowKey, entry] of summary) {
@@ -193,7 +184,7 @@ export function crossCheckSheets(workbook) {
   for (const [rowKey, entry] of sources) {
     if (!summary.has(rowKey)) mismatches.push(label(entry, `thiếu trong TH (${entry.row.leadTime})`));
   }
-  return { checked: true, mismatches, dailyTotals: checkDailyTotals(readRowsFromSheet(thSheet, 4)) };
+  return { checked: true, mismatches, dailyTotals: checkDailyTotals(checkedSheet(thSheet, 4, null, getSheetKey(workbook, 'TH'))) };
 }
 
 const shortDate = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '');
@@ -217,16 +208,20 @@ export function checkDailyTotals({ rows, days }) {
 export function readBooking(workbook) {
   const { rows, days } = readBookingSheets(workbook);
   const repairs = repairBookingRows(rows);
-  for (const row of rows) {
+  const normalized = validateBookingRows(rows);
+  for (const row of normalized) {
     delete row.sheetName;
     delete row.sheetRow;
   }
-  return { rows, days, repairs };
+  return { rows: normalized, days, repairs };
 }
 
 function readBookingSheets(workbook) {
   const thKey = getSheetKey(workbook, 'TH');
-  if (thKey) return readRowsFromSheet(workbook.Sheets[thKey], 4, null, thKey);
+  if (thKey) {
+    const summary = readRowsFromSheet(workbook.Sheets[thKey], 4, null, thKey);
+    if (summary.rows.length) return summary;
+  }
   const parts = LEAD_TIME_SHEETS
     .map(([sheetName, leadTime]) => [getSheetKey(workbook, sheetName), leadTime])
     .filter(([sheetKey]) => Boolean(sheetKey))
@@ -311,6 +306,7 @@ export function summarizeModels(rows) {
 }
 
 export function summarizeBooking(rows) {
+  rows = validateBookingRows(rows);
   return {
     rowCount: rows.length,
     totalQuantity: rows.reduce((sum, row) => sum + row.lineQuantity, 0),

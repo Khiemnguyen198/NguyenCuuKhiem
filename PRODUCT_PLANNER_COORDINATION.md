@@ -62,3 +62,13 @@ Always pull `master` before editing. Do not treat the GPT Sites deployment as th
 4. Commit one coherent change and push to `master`.
 5. Update this file only when product rules, implemented scope, limitations, or deployment behavior change.
 6. Report the pushed commit SHA so the other chat can continue from the exact revision.
+
+## Data integrity fixes after v0.0.11
+
+- Imports reject missing/invalid/unsafe booking numbers after the existing repair flow; calendar dates are validated without UTC day shifts.
+- SQLite body decoding is UTF-8 safe and byte-limited; booking rows, file history and AI checks commit or roll back together.
+- Failed saves retain the previous booking and expose a persistent retry action. Failed reads retain the current data rather than displaying a demo booking.
+- Browser booking rows and history use a snapshot/rollback write; quota failures do not report success.
+- Storage mode is explicit: ordinary builds remain static, desktop builds use the API, and VITE_STATIC_PAGES can override the mode. Base paths do not imply browser-only persistence.
+- Historical plan viewing does not replace the newest booking used for source matching and exports.
+- Excel and Electron dependencies are pinned to patched versions; the maintained XLSX mirror source is documented in README.

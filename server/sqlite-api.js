@@ -4,15 +4,13 @@ import { basename, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { analyzeBookingRows, LOCAL_AI_VERSION } from '../src/local-ai.js';
-import { DEMO_DASHBOARD } from '../src/demo-data.js';
 import { compactRows, diffBookingRows } from '../src/booking-diff.js';
-
-let database;
+import { validateBookingRows } from '../src/booking-validation.js';
 
 // Opened on dev-server start only, so `vite build` never creates a database.
-function openDatabase(dataDirectory = resolve('.data')) {
+function openDatabase(dataDirectory = resolve(process.env.PLANNER_DATA_DIR || '.data')) {
   mkdirSync(dataDirectory, { recursive: true });
-  database = new DatabaseSync(resolve(dataDirectory, 'planner.db'));
+  const database = new DatabaseSync(resolve(dataDirectory, 'planner.db'));
   database.exec(`
   PRAGMA foreign_keys = ON;
   PRAGMA journal_mode = WAL;
@@ -112,14 +110,15 @@ function openDatabase(dataDirectory = resolve('.data')) {
   const originColumns = database.prepare('PRAGMA table_info(source_origins)').all().map((column) => column.name);
   if (!originColumns.includes('content_hash')) database.exec('ALTER TABLE source_origins ADD COLUMN content_hash TEXT');
   if (!originColumns.includes('checked_at')) database.exec('ALTER TABLE source_origins ADD COLUMN checked_at TEXT');
-  for (const kind of SOURCE_KINDS) pruneSnapshots(kind);
+  for (const kind of SOURCE_KINDS) pruneSnapshots(database, kind);
+  return database;
 }
 
 const SOURCE_KINDS = new Set(['receipts', 'deliveries']);
 // Only the newest snapshot is read; a few older ones are kept, not one per refresh forever.
 const KEPT_SNAPSHOTS = 3;
 
-function pruneSnapshots(kind) {
+function pruneSnapshots(database, kind) {
   database.prepare(`
     DELETE FROM source_snapshots WHERE kind = ? AND id NOT IN (
       SELECT id FROM source_snapshots WHERE kind = ? ORDER BY id DESC LIMIT ?
@@ -130,7 +129,7 @@ const ORIGIN_KINDS = new Set(['booking', ...SOURCE_KINDS]);
 
 // Where each input is refreshed from: a share link or a file path, plus the file's modified
 // time when it was last read, so a changed file is read again.
-function listOrigins() {
+function listOrigins(database) {
   const origins = Object.fromEntries([...ORIGIN_KINDS].map((kind) => [kind, null]));
   for (const row of database.prepare('SELECT kind, origin, origin_mtime AS mtime, content_hash AS hash, checked_at AS checkedAt FROM source_origins').all()) {
     origins[row.kind] = { origin: row.origin, mtime: row.mtime, hash: row.hash, checkedAt: row.checkedAt };
@@ -158,7 +157,7 @@ export function excelPath(input) {
 // Only the computer running the server may read its files (the dev server listens on the LAN).
 const isLoopback = (request) => /^(127\.|::1$|::ffff:127\.)/.test(request.socket?.remoteAddress || '');
 
-function latestSource(kind) {
+function latestSource(database, kind) {
   const row = database.prepare(`
     SELECT filename, origin, strftime('%Y-%m-%dT%H:%M:%fZ', imported_at) AS importedAt, lines_json AS linesJson
     FROM source_snapshots WHERE kind = ? ORDER BY id DESC LIMIT 1
@@ -206,7 +205,7 @@ export async function fetchWithCookies(url, { maxRedirects = 10 } = {}) {
   throw new Error('Link chuyển hướng quá nhiều lần.');
 }
 
-function bookingRowsFor(importId) {
+function bookingRowsFor(database, importId) {
   return database.prepare(`
     SELECT line, customer, brand, po, ref, color, season, model_code AS modelCode, planner,
            line_quantity AS lineQuantity, input_date AS inputDate, output_date AS outputDate,
@@ -216,12 +215,12 @@ function bookingRowsFor(importId) {
   `).all(importId).map(({ allocationsJson, ...row }) => ({ ...row, allocations: allocationsJson ? JSON.parse(allocationsJson) : {} }));
 }
 
-function bookingDaysFor(importId) {
+function bookingDaysFor(database, importId) {
   const row = database.prepare('SELECT days_json AS daysJson FROM imports WHERE id = ?').get(importId);
   return row?.daysJson ? JSON.parse(row.daysJson) : [];
 }
 
-function listChanges() {
+function listChanges(database) {
   return database.prepare(`
     SELECT c.import_id AS importId, i.filename, c.previous_filename AS previousFilename,
            strftime('%Y-%m-%dT%H:%M:%fZ', c.created_at) AS createdAt,
@@ -232,29 +231,103 @@ function listChanges() {
   `).all().map(({ reportJson, ...change }) => ({ ...change, report: JSON.parse(reportJson) }));
 }
 
+const BODY_LIMIT = Symbol('planner-body-limit');
+
+function httpError(status, message) {
+  return Object.assign(new Error(message), { status });
+}
+
+function errorStatus(error, fallback = 500) {
+  return error.status || (error instanceof SyntaxError ? 400 : fallback);
+}
+
+function sendError(response, error, fallback = 500, message = 'Không thể đọc hoặc lưu dữ liệu. Vui lòng thử lại.') {
+  const status = errorStatus(error, fallback);
+  return sendJson(response, status, { error: status === 500 ? message : error.message });
+}
+
+function checkWriteRequest(request) {
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) return;
+  if (request.headers['sec-fetch-site'] === 'cross-site') throw httpError(403, 'Không cho phép thay đổi dữ liệu từ website khác.');
+  const origin = request.headers.origin;
+  if (!origin) return; // Keep desktop/CLI clients that do not send browser headers working.
+  let expectedOrigin;
+  let actualOrigin;
+  try {
+    const forwarded = request.headers['x-forwarded-proto']?.split(',')[0].trim();
+    const protocol = forwarded === 'https' || request.socket?.encrypted ? 'https:' : 'http:';
+    expectedOrigin = new URL(`${protocol}//${request.headers.host}`).origin;
+    actualOrigin = new URL(origin).origin;
+  } catch {
+    throw httpError(403, 'Nguồn gửi yêu cầu không hợp lệ.');
+  }
+  if (actualOrigin !== expectedOrigin) throw httpError(403, 'Không cho phép thay đổi dữ liệu từ website khác.');
+  if (request.method !== 'DELETE' && request.headers['content-type']?.split(';')[0].trim().toLowerCase() !== 'application/json') {
+    throw httpError(400, 'Yêu cầu phải dùng Content-Type application/json.');
+  }
+}
+
 function readBody(request) {
   return new Promise((resolveBody, rejectBody) => {
-    let body = '';
+    const maxBytes = request[BODY_LIMIT] || 25_000_000;
+    if (Number(request.headers['content-length']) > maxBytes) {
+      request.resume();
+      return rejectBody(httpError(413, 'Payload quá lớn. Giới hạn dữ liệu nhập là 25 MB.'));
+    }
+    let size = 0;
+    let finished = false;
+    const chunks = [];
+    const fail = (error) => {
+      if (finished) return;
+      finished = true;
+      chunks.length = 0;
+      rejectBody(error);
+    };
     request.on('data', (chunk) => {
-      body += chunk;
-      if (body.length > 25_000_000) rejectBody(new Error('Payload quá lớn'));
+      if (finished) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += buffer.length;
+      if (size > maxBytes) return fail(httpError(413, 'Payload quá lớn. Giới hạn dữ liệu nhập là 25 MB.'));
+      chunks.push(buffer);
     });
-    request.on('end', () => resolveBody(body));
-    request.on('error', rejectBody);
+    request.on('end', () => {
+      if (finished) return;
+      finished = true;
+      // A multibyte Vietnamese character can span HTTP chunks: decode only once.
+      resolveBody(Buffer.concat(chunks).toString('utf8'));
+    });
+    request.on('aborted', () => fail(httpError(400, 'Yêu cầu nhập đã bị ngắt.')));
+    request.on('error', () => fail(httpError(400, 'Không thể đọc dữ liệu nhập.')));
   });
+}
+
+async function readJsonBody(request) {
+  let payload;
+  try {
+    payload = JSON.parse(await readBody(request));
+  } catch (error) {
+    if (error.status) throw error;
+    throw httpError(400, 'Dữ liệu JSON không hợp lệ.');
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw httpError(400, 'Dữ liệu JSON phải là một đối tượng.');
+  return payload;
 }
 
 function sendJson(response, status, payload) {
   response.statusCode = status;
   response.setHeader('Content-Type', 'application/json; charset=utf-8');
+  response.setHeader('Cache-Control', 'no-store');
   response.end(JSON.stringify(payload));
 }
 
-function latestDashboard(importId = null) {
+function latestDashboard(database, importId = null) {
   const latest = importId
     ? database.prepare('SELECT * FROM imports WHERE id = ?').get(importId)
     : database.prepare('SELECT * FROM imports ORDER BY id DESC LIMIT 1').get();
-  if (!latest) return DEMO_DASHBOARD;
+  if (!latest) {
+    if (importId) throw httpError(404, 'Không tìm thấy lần nhập booking.');
+    return { source: 'empty', importId: null, filename: '', importedAt: null, rowCount: 0, totalQuantity: 0, totalImpressions: 0, uniquePo: 0, leadTimes: [], models: [] };
+  }
   const leadTimes = database.prepare(`
     SELECT lead_time AS leadTime, COUNT(*) AS rowCount,
            SUM(line_quantity) AS totalQuantity,
@@ -301,7 +374,7 @@ function latestDashboard(importId = null) {
   };
 }
 
-function rowsForAiCheck(importId) {
+function rowsForAiCheck(database, importId) {
   return database.prepare(`
     SELECT line, customer, brand, ref, color, po, season,
            line_quantity AS lineQuantity, input_date AS inputDate, output_date AS outputDate,
@@ -313,13 +386,13 @@ function rowsForAiCheck(importId) {
   `).all(importId);
 }
 
-function localAiCheck(importId, force = false) {
+function localAiCheck(database, importId, force = false) {
   const imported = database.prepare('SELECT id, filename, sheet_check_json AS sheetCheckJson FROM imports WHERE id = ?').get(importId);
   if (!imported) return null;
   const saved = !force && database.prepare('SELECT report_json AS reportJson, engine_version AS engineVersion FROM ai_checks WHERE import_id = ?').get(importId);
   if (saved?.engineVersion === LOCAL_AI_VERSION) return JSON.parse(saved.reportJson);
   const sheetCheck = imported.sheetCheckJson ? JSON.parse(imported.sheetCheckJson) : null;
-  const report = { ...analyzeBookingRows(rowsForAiCheck(importId), { sheetCheck }), importId, filename: imported.filename, source: 'sqlite' };
+  const report = { ...analyzeBookingRows(rowsForAiCheck(database, importId), { sheetCheck }), importId, filename: imported.filename, source: 'sqlite' };
   database.prepare(`
     INSERT INTO ai_checks(import_id, engine_version, score, status, checked_at, report_json)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -335,12 +408,23 @@ function localAiCheck(importId, force = false) {
 
 // Registers every /api route on a connect-style `use(prefix, handler)`: the Vite dev server
 // in development, the desktop app's own HTTP server in the packaged app.
-export function registerApi(use, { dataDirectory } = {}) {
-  openDatabase(dataDirectory);
+export function registerApi(register, { dataDirectory, maxBodyBytes = 25_000_000 } = {}) {
+  const database = openDatabase(dataDirectory);
+  let closed = false;
+  const use = (prefix, handler) => register(prefix, async (request, response) => {
+    request[BODY_LIMIT] = maxBodyBytes;
+    try {
+      checkWriteRequest(request);
+      return await handler(request, response);
+    } catch (error) {
+      request.resume();
+      if (!response.writableEnded) sendError(response, error);
+    }
+  });
   use('/api/dashboard', (request, response) => {
     if (request.method !== 'GET') return sendJson(response, 405, { error: 'Method not allowed' });
     const requestedId = Number(new URL(request.url, 'http://local').searchParams.get('id')) || null;
-    sendJson(response, 200, latestDashboard(requestedId));
+    sendJson(response, 200, latestDashboard(database, requestedId));
   });
 
   use('/api/ai-check', (request, response) => {
@@ -349,12 +433,12 @@ export function registerApi(use, { dataDirectory } = {}) {
     const importId = Number(url.searchParams.get('id'));
     if (!importId) return sendJson(response, 400, { error: 'Thiếu mã lần nhập.' });
     try {
-      const report = localAiCheck(importId, url.searchParams.get('force') === '1');
+      const report = localAiCheck(database, importId, url.searchParams.get('force') === '1');
       return report
         ? sendJson(response, 200, report)
         : sendJson(response, 404, { error: 'Không tìm thấy dữ liệu trong SQLite.' });
     } catch (error) {
-      return sendJson(response, 500, { error: error.message || 'AI local không thể kiểm tra dữ liệu.' });
+      return sendError(response, error, 500, 'AI local không thể kiểm tra dữ liệu.');
     }
   });
 
@@ -370,7 +454,7 @@ export function registerApi(use, { dataDirectory } = {}) {
     if (request.method === 'GET') return sendJson(response, 200, { files: listFiles() });
     if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
     try {
-      const { fileId, category, note } = JSON.parse(await readBody(request));
+      const { fileId, category, note } = await readJsonBody(request);
       const file = database.prepare('SELECT * FROM file_history WHERE id = ?').get(fileId ?? null);
       if (!file) return sendJson(response, 404, { error: 'Không tìm thấy file.' });
       const expected = file.category === 'original' ? 'processed' : file.category === 'processed' ? 'delivered' : null;
@@ -384,7 +468,7 @@ export function registerApi(use, { dataDirectory } = {}) {
       );
       return sendJson(response, 200, { files: listFiles() });
     } catch (error) {
-      return sendJson(response, 400, { error: error.message || 'Không thể cập nhật file.' });
+      return sendError(response, error, 400);
     }
   });
 
@@ -395,54 +479,54 @@ export function registerApi(use, { dataDirectory } = {}) {
     if (!imported) return sendJson(response, 404, { error: 'Không tìm thấy lần nhập booking.' });
     return sendJson(response, 200, {
       filename: imported.filename,
-      days: bookingDaysFor(importId),
-      rows: bookingRowsFor(importId),
+      days: bookingDaysFor(database, importId),
+      rows: bookingRowsFor(database, importId),
       sheetCheck: imported.sheetCheckJson ? JSON.parse(imported.sheetCheckJson) : null
     });
   });
 
   use('/api/changes', async (request, response) => {
-    if (request.method === 'GET') return sendJson(response, 200, { changes: listChanges() });
+    if (request.method === 'GET') return sendJson(response, 200, { changes: listChanges(database) });
     if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
     try {
-      const { importId } = JSON.parse(await readBody(request));
+      const { importId } = await readJsonBody(request);
       const updated = database.prepare('UPDATE booking_changes SET reviewed_at = CURRENT_TIMESTAMP WHERE import_id = ? AND reviewed_at IS NULL').run(Number(importId));
       if (!updated.changes) return sendJson(response, 404, { error: 'Không tìm thấy thay đổi cần xác nhận.' });
-      return sendJson(response, 200, { changes: listChanges() });
+      return sendJson(response, 200, { changes: listChanges(database) });
     } catch (error) {
-      return sendJson(response, 400, { error: error.message || 'Không thể xác nhận thay đổi.' });
+      return sendError(response, error, 400);
     }
   });
 
   use('/api/sources', async (request, response) => {
     const kind = new URL(request.url, 'http://local').searchParams.get('kind');
     if (!SOURCE_KINDS.has(kind)) return sendJson(response, 400, { error: 'Loại nguồn dữ liệu không hợp lệ.' });
-    if (request.method === 'GET') return sendJson(response, 200, latestSource(kind));
+    if (request.method === 'GET') return sendJson(response, 200, latestSource(database, kind));
     if (request.method === 'DELETE') {
       database.prepare('DELETE FROM source_snapshots WHERE kind = ?').run(kind);
       database.prepare('DELETE FROM source_origins WHERE kind = ?').run(kind);
-      return sendJson(response, 200, latestSource(kind));
+      return sendJson(response, 200, latestSource(database, kind));
     }
     if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
     try {
-      const payload = JSON.parse(await readBody(request));
+      const payload = await readJsonBody(request);
       if (!payload.filename || !Array.isArray(payload.lines) || !payload.lines.length) {
         return sendJson(response, 400, { error: 'File không có dòng dữ liệu hợp lệ.' });
       }
       database.prepare('INSERT INTO source_snapshots(kind, filename, origin, lines_json) VALUES (?, ?, ?, ?)')
         .run(kind, payload.filename, payload.origin || null, JSON.stringify(payload.lines));
-      pruneSnapshots(kind);
-      return sendJson(response, 201, latestSource(kind));
+      pruneSnapshots(database, kind);
+      return sendJson(response, 201, latestSource(database, kind));
     } catch (error) {
-      return sendJson(response, 500, { error: error.message || 'Không thể lưu nguồn dữ liệu.' });
+      return sendError(response, error);
     }
   });
 
   use('/api/origins', async (request, response) => {
-    if (request.method === 'GET') return sendJson(response, 200, listOrigins());
+    if (request.method === 'GET') return sendJson(response, 200, listOrigins(database));
     if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
     try {
-      const { kind, origin, mtime, hash, checkedAt } = JSON.parse(await readBody(request));
+      const { kind, origin, mtime, hash, checkedAt } = await readJsonBody(request);
       if (!ORIGIN_KINDS.has(kind)) return sendJson(response, 400, { error: 'Loại nguồn dữ liệu không hợp lệ.' });
       if (origin) {
         database.prepare(`
@@ -453,9 +537,9 @@ export function registerApi(use, { dataDirectory } = {}) {
       } else {
         database.prepare('DELETE FROM source_origins WHERE kind = ?').run(kind);
       }
-      return sendJson(response, 200, listOrigins());
+      return sendJson(response, 200, listOrigins(database));
     } catch (error) {
-      return sendJson(response, 400, { error: error.message || 'Không lưu được nguồn dữ liệu.' });
+      return sendError(response, error, 400);
     }
   });
 
@@ -466,9 +550,9 @@ export function registerApi(use, { dataDirectory } = {}) {
     if (!isLoopback(request)) return sendJson(response, 403, { error: 'Chỉ đọc được đường dẫn trên máy đang chạy ứng dụng.' });
     let path;
     try {
-      path = excelPath(JSON.parse(await readBody(request)).path);
+      path = excelPath((await readJsonBody(request)).path);
     } catch (error) {
-      return sendJson(response, 400, { error: error.message });
+      return sendError(response, error, 400);
     }
     try {
       const info = await stat(path);
@@ -495,7 +579,7 @@ export function registerApi(use, { dataDirectory } = {}) {
   use('/api/fetch-url', async (request, response) => {
     if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
     try {
-      const { url } = JSON.parse(await readBody(request));
+      const { url } = await readJsonBody(request);
       const target = directDownloadUrl(String(url || ''));
       if (isPrivateHost(new URL(target).hostname)) return sendJson(response, 400, { error: 'Không tải file từ địa chỉ nội bộ.' });
       const upstream = await fetchWithCookies(target);
@@ -516,7 +600,7 @@ export function registerApi(use, { dataDirectory } = {}) {
       response.setHeader('X-Filename', encodeURIComponent(filename));
       return response.end(bytes);
     } catch (error) {
-      return sendJson(response, 400, { error: error.message || 'Link không hợp lệ.' });
+      return sendError(response, error, 400);
     }
   });
 
@@ -527,14 +611,18 @@ export function registerApi(use, { dataDirectory } = {}) {
       const removed = importId ? database.prepare('DELETE FROM imports WHERE id = ?').run(importId) : { changes: 0 };
       if (!removed.changes) return sendJson(response, 404, { error: 'Không tìm thấy file booking.' });
       if (!database.prepare('SELECT 1 FROM imports LIMIT 1').get()) database.prepare("DELETE FROM source_origins WHERE kind = 'booking'").run();
-      return sendJson(response, 200, latestDashboard());
+      return sendJson(response, 200, latestDashboard(database));
     }
     if (request.method !== 'POST') return sendJson(response, 405, { error: 'Method not allowed' });
     try {
-      const payload = JSON.parse(await readBody(request));
-      if (!payload.filename || !Array.isArray(payload.rows) || payload.rows.length === 0) {
+      const payload = await readJsonBody(request);
+      if (typeof payload.filename !== 'string' || !payload.filename.trim() || payload.filename.length > 1024 || !Array.isArray(payload.rows) || payload.rows.length === 0) {
         return sendJson(response, 400, { error: 'File không có dòng booking hợp lệ.' });
       }
+      payload.filename = payload.filename.trim();
+      // Missing LINE / PO and optional metadata are retained for the repair/check flow.
+      // Only invalid quantities are rejected before any history or rows are persisted.
+      payload.rows = validateBookingRows(payload.rows);
 
       const totalQuantity = payload.rows.reduce((sum, row) => sum + Number(row.lineQuantity || 0), 0);
       const totalImpressions = payload.rows.reduce(
@@ -545,7 +633,7 @@ export function registerApi(use, { dataDirectory } = {}) {
       const previous = database.prepare('SELECT id, filename FROM imports ORDER BY id DESC LIMIT 1').get();
       const days = Array.isArray(payload.days) ? payload.days : [];
       const report = previous
-        ? diffBookingRows(bookingRowsFor(previous.id), compactRows(payload.rows), { previousDays: bookingDaysFor(previous.id), currentDays: days })
+        ? diffBookingRows(bookingRowsFor(database, previous.id), compactRows(payload.rows), { previousDays: bookingDaysFor(database, previous.id), currentDays: days })
         : null;
 
       database.exec('BEGIN IMMEDIATE');
@@ -572,13 +660,13 @@ export function registerApi(use, { dataDirectory } = {}) {
             row.color ?? null,
             row.po ?? null,
             row.season ?? null,
-            Number(row.lineQuantity || 0),
+            row.lineQuantity,
             row.inputDate ?? null,
             row.outputDate ?? null,
             row.modelCode ?? null,
             row.ticketNumber ?? null,
             row.planner ?? null,
-            Number(row.printCount || 0),
+            row.printCount,
             row.leadTime ?? null,
             row.contractQuantity ?? null,
             row.allocations && Object.keys(row.allocations).length ? JSON.stringify(row.allocations) : null
@@ -592,25 +680,34 @@ export function registerApi(use, { dataDirectory } = {}) {
           database.prepare('INSERT INTO booking_changes(import_id, previous_import_id, previous_filename, report_json) VALUES (?, ?, ?, ?)')
             .run(imported.lastInsertRowid, previous.id, previous.filename, JSON.stringify(report));
         }
+        // The check belongs to the same atomic import, rather than failing after commit.
+        localAiCheck(database, Number(imported.lastInsertRowid), true);
         database.exec('COMMIT');
       } catch (error) {
         database.exec('ROLLBACK');
         throw error;
       }
-      const dashboard = latestDashboard();
-      localAiCheck(dashboard.importId, true);
-      sendJson(response, 201, { ...dashboard, changes: report?.hasChanges ? listChanges()[0] : null });
+      const dashboard = latestDashboard(database);
+      sendJson(response, 201, { ...dashboard, changes: report?.hasChanges ? listChanges(database)[0] : null });
     } catch (error) {
-      sendJson(response, 500, { error: error.message || 'Không thể lưu dữ liệu.' });
+      sendError(response, error);
     }
   });
+  return () => {
+    if (closed) return;
+    closed = true;
+    database.close();
+  };
 }
 
-export function sqliteApi() {
-  return {
-    name: 'sqlite-api',
-    configureServer(server) {
-      registerApi((prefix, handler) => server.middlewares.use(prefix, handler));
-    }
-  };
+export function sqliteApi(options) {
+  function configure(server) {
+    const base = new URL(server.config.base, 'http://localhost').pathname.replace(/\/$/, '');
+    const close = registerApi((prefix, handler) => {
+      server.middlewares.use(prefix, handler);
+      if (base) server.middlewares.use(`${base}${prefix}`, handler);
+    }, options);
+    server.httpServer?.once('close', close);
+  }
+  return { name: 'sqlite-api', configureServer: configure, configurePreviewServer: configure };
 }
