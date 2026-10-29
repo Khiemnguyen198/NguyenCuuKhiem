@@ -1,0 +1,81 @@
+name: Build and release desktop
+on:
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: read
+jobs:
+  mac:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run dist:mac -- --publish never
+      - name: Verify Mac installers
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          test "v$version" = "$GITHUB_REF_NAME"
+          test -s "release/Inkava-Planner-$version-arm64.dmg"
+          test -s "release/Inkava-Planner-$version-x64.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-mac
+          path: release/*.dmg
+          if-no-files-found: error
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run dist:win -- --publish never
+      - name: Verify Windows installer
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          if ("v$version" -ne $env:GITHUB_REF_NAME) { throw 'Version and tag do not match' }
+          $file = "release/Inkava-Planner-Setup-$version.exe"
+          if (!(Test-Path $file) -or (Get-Item $file).Length -eq 0) { throw "Missing $file" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-windows
+          path: release/*.exe
+          if-no-files-found: error
+  publish:
+    needs: [mac, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          path: installers
+          merge-multiple: true
+      - name: Verify all installers and publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          tag="v$version"
+          test "$tag" = "$GITHUB_REF_NAME"
+          test -s "installers/Inkava-Planner-$version-arm64.dmg"
+          test -s "installers/Inkava-Planner-$version-x64.dmg"
+          test -s "installers/Inkava-Planner-Setup-$version.exe"
+          gh release create "$tag" --verify-tag --draft --title "Inkava Planner $tag" --notes-file "RELEASE_NOTES_$tag.md"
+          gh release upload "$tag" "installers/Inkava-Planner-$version-arm64.dmg" "installers/Inkava-Planner-$version-x64.dmg" "installers/Inkava-Planner-Setup-$version.exe"
+          gh release edit "$tag" --draft=false --latest
