@@ -344,7 +344,7 @@ function renderExportFab() {
   fab.hidden = !latestBooking.importId || !bookingDetail.rows.length;
   const booking = activeBooking();
   document.querySelector('#exportFabScope').textContent = booking.batch ? booking.batch.label.replace(/ \(.*\)$/, '') : 'Cả file booking';
-  fab.title = `Xuất TH + CAN DOI cho ${booking.batch?.label || 'cả file booking'}`;
+  fab.title = `Xuất TH + CAN_DOI cho ${booking.batch?.label || 'cả file booking'}`;
 }
 
 // Tổng quan → Kiểm tra (booking card): the selected week as a calendar, one region per order.
@@ -829,7 +829,7 @@ async function exportSummary() {
   const booking = exportBooking();
   const filename = exportFilename(new Date(), booking.batch);
   if (!booking.rows?.length) throw new Error('Chưa có dữ liệu booking chi tiết. Nhập lại file booking trước khi xuất.');
-  const workbook = buildExportWorkbook({ booking, lots: lotSummary.items, sheetCheck: bookingDetail.sheetCheck });
+  const workbook = buildExportWorkbook({ booking, lots: lotSummary.items, sheetCheck: bookingDetail.sheetCheck, allRows: bookingDetail.rows });
   await downloadWorkbook(workbook, filename);
   // The export is the "processed" result of the newest booking file.
   const original = fileHistoryState.find((file) => file.category === 'original' && String(file.importId) === String(latestBooking.importId));

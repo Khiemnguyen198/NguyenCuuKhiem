@@ -2,6 +2,10 @@ import { escapeHtml } from './format.js';
 
 // Bundle notes with their version so they remain accurate and available offline.
 const RELEASE_NOTES = {
+  '0.0.25': [
+    'CAN_DOI theo đúng file KHSX: thêm SỐ PHIẾU và cột thứ bắt đầu in.',
+    'Gom theo SLHĐ TỔNG của booking như pivot KHSX; giữ mọi nhóm, nhóm ngoài phạm vi có W = 0.'
+  ],
   '0.0.24': [
     'Ưu tiên PO / số phiếu trước FIFO; tách lô theo mùa.',
     'Giữ ngày PXI của booking leadtime, báo rõ khi các sheet mâu thuẫn.',

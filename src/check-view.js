@@ -187,6 +187,6 @@ export function renderCheckReport({ booking, summary, sources, aiReport, sheetCh
     <section class="check-block"><h3>Xem trước ${number(Math.min(PREVIEW_ROWS, rows.length))} / ${number(rows.length)} dòng sẽ xuất</h3>
       <div class="table-wrap"><table class="delivery-table check-preview"><thead><tr><th>PO</th><th class="th-left">Mã hàng</th><th class="th-left">Model</th><th class="th-left">Màu</th><th>SL trong phạm vi</th><th>Nhận BTP</th><th>Đã in (giao)</th><th>Còn thiếu</th><th>Hạn giao</th><th>Trạng thái lô</th></tr></thead>
       <tbody>${preview || '<tr><td colspan="10" class="delivery-table__empty">Không có dòng nào.</td></tr>'}</tbody></table></div>
-      <p class="check-note">File xuất gồm 3 sheet: KẾ HOẠCH GIAO HÀNG, TH và CAN DOI, theo phạm vi ngày đã chọn.</p>
+      <p class="check-note">File xuất gồm 3 sheet: KẾ HOẠCH GIAO HÀNG, TH và CAN_DOI, theo phạm vi ngày đã chọn.</p>
     </section>`;
 }
