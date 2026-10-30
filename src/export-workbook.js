@@ -27,7 +27,7 @@ const dateCell = (iso, format) => {
   const value = serial(iso);
   return value == null ? null : { t: 'n', v: value, z: format };
 };
-const numberCell = (value, format = '#,##0') => (typeof value === 'number' && Number.isFinite(value) ? { t: 'n', v: value, z: format } : value ?? null);
+const numberCell = (value, format = '#,##0.##') => (typeof value === 'number' && Number.isFinite(value) ? { t: 'n', v: value, z: format } : value ?? null);
 
 // Columns A–P of the customer's TH sheet, in the same order and spelling.
 const TH_COLUMNS = [
@@ -130,13 +130,22 @@ function thSheet({ booking, lots, sheetCheck }) {
       null,
       ...days.map((day, index) => {
         const value = row.allocations?.[index];
-        return value == null ? null : numberCell(value, '#,##0');
+        return value == null ? null : numberCell(value, '#,##0.##');
       }),
       ...progress.map(([, read]) => read(row, lot))
     ]);
   }
   if (!rows.length) table.push(['Chưa có dữ liệu booking chi tiết. Nhập lại file booking để có sheet này.']);
   const sheet = XLSX.utils.aoa_to_sheet(table);
+  const endRow = Math.max(6, table.length);
+  const col = XLSX.utils.encode_col;
+  days.forEach((day, index) => {
+    const c = col(firstDay + index);
+    sheet[`${c}4`] = { t: 'n', v: load[index], z: '#,##0.##', f: `SUMPRODUCT(SUBTOTAL(109,OFFSET(${c}6,ROW(${c}6:${c}${endRow})-ROW(${c}6),0,1)),$O$6:$O$${endRow})` };
+  });
+  for (const span of merges) {
+    sheet[cellAddress(2, firstDay + span.start)] = { t: 'n', v: span.total, z: '#,##0.##', f: `SUM(${col(firstDay + span.start)}4:${col(firstDay + span.end)}4)` };
+  }
   sheet['!merges'] = merges
     .filter((span) => span.end > span.start)
     .map((span) => ({ s: { r: 2, c: firstDay + span.start }, e: { r: 2, c: firstDay + span.end } }));
@@ -176,6 +185,14 @@ function canDoiSheet({ booking, lots }) {
     .filter(({ day, index }) => !isSunday(day.date) || rows.some((row) => typeof row.allocations?.[index] === 'number'));
   const days = kept.map(({ day }) => day);
   const lotsByKey = new Map(lots.map((lot) => [lot.key, lot]));
+  const thRows = new Map();
+  let thIndex = 6;
+  let previousLead = null;
+  for (const row of rows) {
+    if (previousLead != null && previousLead !== row.leadTime) thIndex++;
+    previousLead = row.leadTime;
+    thRows.set(row, thIndex++);
+  }
   const groups = new Map();
   for (const row of rows) {
     const key = [row.lotKey, row.printCount, row.leadTime].join('|');
@@ -198,21 +215,21 @@ function canDoiSheet({ booking, lots }) {
   const last = Math.max(first, first + ordered.length - 1);
   const firstDay = CAN_DOI_COLUMNS.length;
   const letter = (column) => XLSX.utils.encode_col(column);
-  const formulaCell = (formula, value, format = '#,##0') => ({ t: 'n', v: value, f: formula, z: format });
+  const formulaCell = (formula, value, format = '#,##0.##') => ({ t: 'n', v: value, f: formula, z: format });
   const weekLabel = booking.batch?.range ? 'Khoảng ngày' : days.length ? `W${isoWeek(days[0].date)}` : 'W';
   const header = [...CAN_DOI_COLUMNS.map(([title]) => (title === 'W' ? weekLabel : title)), ...days.map((day) => `Sum of ${viDay(day.date).slice(0, 5)}`)];
   const sum = (field) => ordered.reduce((total, group) => total + group[field], 0);
   const column = (name) => CAN_DOI_COLUMNS.findIndex(([title]) => title === name);
   const totalsRow = Array(header.length).fill(null);
-  for (const name of ['Thực Nhận', 'Đã In', 'Đã Giao', 'GAP']) {
+  for (const name of ['W', 'Thực Nhận', 'Đã In', 'Đã Giao', 'GAP']) {
     const index = column(name);
-    const value = name === 'GAP' ? sum('good') - ordered.reduce((total, group) => total + group.days.reduce((a, b) => a + b, 0), 0) : sum({ 'Thực Nhận': 'received', 'Đã In': 'delivered', 'Đã Giao': 'good' }[name]);
-    totalsRow[index] = formulaCell(`SUBTOTAL(9,${letter(index)}${first + 1}:${letter(index)}${last + 1})`, Math.round(value));
+    const value = name === 'W' ? ordered.reduce((total, group) => total + group.days.reduce((a, b) => a + b, 0), 0) : name === 'GAP' ? sum('good') - ordered.reduce((total, group) => total + group.days.reduce((a, b) => a + b, 0), 0) : sum({ 'Thực Nhận': 'received', 'Đã In': 'delivered', 'Đã Giao': 'good' }[name]);
+    totalsRow[index] = formulaCell(`SUBTOTAL(109,${letter(index)}${first + 1}:${letter(index)}${last + 1})`, value);
   }
   days.forEach((day, index) => {
     const dayColumn = letter(firstDay + index);
     const load = ordered.reduce((total, group) => total + group.days[index] * (Number(group.row.printCount) || 0), 0);
-    totalsRow[firstDay + index] = formulaCell(`SUMPRODUCT($F$${first + 1}:$F$${last + 1},${dayColumn}${first + 1}:${dayColumn}${last + 1})`, Math.round(load));
+    totalsRow[firstDay + index] = formulaCell(`SUMPRODUCT(SUBTOTAL(109,OFFSET(${dayColumn}${first + 1},ROW(${dayColumn}${first + 1}:${dayColumn}${last + 1})-ROW(${dayColumn}${first + 1}),0,1)),$F$${first + 1}:$F$${last + 1})`, load);
   });
 
   const table = [[], [], totalsRow, header];
@@ -222,12 +239,12 @@ function canDoiSheet({ booking, lots }) {
     const contract = group.lot?.contract ?? group.row.contractQuantity ?? 0;
     table.push([
       `${group.row.ref}${group.row.modelCode}${contract}`,
-      group.row.ref, group.row.modelCode, group.row.season, numberCell(contract), numberCell(Number(group.row.printCount) || 0, '0'), group.row.leadTime,
-      formulaCell(`SUM(${letter(firstDay)}${excelRow}:${letter(firstDay + Math.max(days.length, 1) - 1)}${excelRow})`, Math.round(weekTotal)),
+      group.row.ref, group.row.modelCode, group.row.season, numberCell(contract), formulaCell(`'TH'!O${thRows.get(group.row)}`, Number(group.row.printCount) || 0, '0'), group.row.leadTime,
+      formulaCell(`SUM(${letter(firstDay)}${excelRow}:${letter(firstDay + Math.max(days.length, 1) - 1)}${excelRow})`, weekTotal),
       dateCell(confirmedReceiptDate(group.rows), 'dd/mm'),
       numberCell(Math.round(group.received)), numberCell(Math.round(group.delivered)), numberCell(Math.round(group.good)),
-      formulaCell(`L${excelRow}-H${excelRow}`, Math.round(group.good - weekTotal)),
-      ...group.days.map((value) => (value ? numberCell(Math.round(value * 100) / 100) : null))
+      formulaCell(`L${excelRow}-H${excelRow}`, group.good - weekTotal),
+      ...group.days.map((value, index) => formulaCell(`SUM(${group.rows.map(row => `'TH'!${letter(17 + kept[index].index)}${thRows.get(row)}`).join(',')})`, value))
     ]);
   });
   if (!ordered.length) table.push(['Không có lô nào trong tuần đã chọn.']);

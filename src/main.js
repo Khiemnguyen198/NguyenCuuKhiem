@@ -377,9 +377,9 @@ function renderCalendarView() {
   const dayColumn = columns.findIndex((column) => column.date === selectedDate);
   const shownOrders = filterCalendar(orders, calendarFilter).filter((order) => dayColumn === -1 || order.cells[dayColumn] > 0);
   grid.innerHTML = renderCalendar({ columns, orders, shownOrders, selectedDate, today: todayIso() });
-  const total = orders.reduce((sum, order) => sum + order.quantity, 0);
+  const total = shownOrders.reduce((sum, order) => sum + order.quantity, 0);
   document.querySelector('#calendarTitle').textContent = selectedDate ? `${week.label} · ${dayName(selectedDate)}` : week.label;
-  document.querySelector('#calendarMeta').textContent = `${shownOrders.length === orders.length ? '' : `${formatNumber.format(shownOrders.length)} / `}${formatNumber.format(orders.length)} đơn · ${formatNumber.format(Math.round(total))} sản phẩm trong tuần`;
+  document.querySelector('#calendarMeta').textContent = `${shownOrders.length === orders.length ? '' : `${formatNumber.format(shownOrders.length)} / `}${formatNumber.format(orders.length)} đơn · ${formatNumber.format(Math.round(total))} sản phẩm đang hiển thị`;
   document.querySelectorAll('[data-calendar-filter]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.calendarFilter === calendarFilter.status)));
   const weeks = bookingWeeks();
   const position = weeks.findIndex((item) => item.key === week.key);

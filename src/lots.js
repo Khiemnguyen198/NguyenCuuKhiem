@@ -24,7 +24,7 @@ export function buildLots(rows = []) {
   const lots = new Map();
   for (const row of rows) {
     const ticket = hasTicket(row.ticketNumber) ? String(row.ticketNumber).trim() : null;
-    const key = ticket ? `T:${ticket}|${productOf(row.ref, modelCodeOf(row.color, row.modelCode))}` : `L:${up(row.line)}|${up(row.ref)}|${up(row.color)}|${row.inputDate || ''}`;
+    const key = ticket ? `T:${ticket}|${productOf(row.ref, modelCodeOf(row.color, row.modelCode))}|${up(row.season)}` : `L:${up(row.line)}|${up(row.ref)}|${up(row.color)}|${row.inputDate || ''}|${up(row.season)}`;
     const lot = lots.get(key) || {
       key, ticket, ref: row.ref, modelCode: modelCodeOf(row.color, row.modelCode), color: row.color,
       season: row.season, customer: row.customer, leadTime: row.leadTime, rows: [], contract: 0,
@@ -147,7 +147,7 @@ function assignRowDates(lots, receiptLines, deliveryLines) {
   const shared = new Map();
   for (const line of receiptLines) {
     if (!(Number(line.received) > 0) || !hasTicket(line.po)) continue;
-    const key = `${productOf(line.model, modelCodeOf(line.color))}|${up(line.po)}`;
+    const key = `${productOf(line.model, modelCodeOf(line.color))}|${resolveSeason(productOf(line.model, modelCodeOf(line.color)), line.season) ?? up(line.season)}|${up(line.po)}`;
     const group = shared.get(key) || { lines: [], rows: [] };
     group.lines.push(line);
     shared.set(key, group);
@@ -291,19 +291,35 @@ export function confirmedReceiptDate(rows) {
 export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLines = [], today = new Date(), pinnedLots = new Set() } = {}) {
   const startOfToday = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
   const lots = buildLots(bookingRows);
-  const lotsByTicket = new Map();
-  for (const lot of lots) {
-    if (!lot.ticket) continue;
-    const matches = lotsByTicket.get(lot.ticket) || [];
-    matches.push(lot);
-    lotsByTicket.set(lot.ticket, matches);
-  }
-  const directLot = (unit) => {
-    if (!unit.ticket) return null;
-    const candidates = lotsByTicket.get(unit.ticket) || [];
-    return candidates.find((lot) => lot.product === unit.product) || (candidates.length === 1 ? candidates[0] : null);
-  };
   const resolveSeason = seasonResolver(lots);
+  const identifiedRows = (unit) => {
+    const season = resolveSeason(unit.product, unit.season);
+    const compatible = lots.filter(lot => lot.product === unit.product && up(lot.season) === season);
+    const tokens = [unit.fullPo, unit.po, unit.ticket, String(unit.po || '').replace(/-(?:OB|TB)$/i, '')].map(up).filter(Boolean);
+    for (const token of tokens) {
+      const matches = compatible.flatMap(lot => lot.rows.filter(row => up(row.po) === token));
+      if (matches.length === 1) return matches;
+    }
+    const token = up(unit.ticket);
+    let matches = compatible.filter(lot => token && up(lot.ticket) === token);
+    if (!matches.length && !/^\s*\d{7}/.test(String(unit.color || ''))) {
+      matches = lots.filter(lot => token && up(lot.ticket) === token && up(lot.ref) === up(unit.ref || unit.model)
+        && (!up(unit.season) || up(lot.season) === up(unit.season)));
+    }
+    return matches.length === 1 ? matches[0].rows : [];
+  };
+  const directLot = unit => {
+    const rows = identifiedRows(unit);
+    return rows.length ? lots.find(lot => lot.rows.includes(rows[0])) : null;
+  };
+  const rowAmounts = new Map();
+  const remember = (unit, fields) => {
+    const rows = identifiedRows(unit);
+    if (rows.length !== 1) return;
+    const amounts = rowAmounts.get(rows[0]) || ZERO();
+    for (const field of fields) amounts[field] += Number(unit[field] || 0);
+    rowAmounts.set(rows[0], amounts);
+  };
   const lotsByProductSeason = new Map();
   for (const lot of lots) {
     const key = `${lot.product}|${up(lot.season)}`;
@@ -320,9 +336,9 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
   }
 
   // Warehouse units: one per product + season + ticket, reduced to the slowest print.
-  const unitKey = (line, customer) => `${customerKey(customer)}|${productOf(line.model, modelCodeOf(line.color))}|${up(line.season)}|${line.ticket || ''}`;
+  const unitKey = (line, customer) => `${customerKey(customer)}|${productOf(line.model, modelCodeOf(line.color))}|${up(line.season)}|${line.ticket || ''}|${up(line.fullPo || String(line.po || '').replace(/-(?:OB|TB)$/i, ''))}`;
   const deliveryUnits = groupDeliveries(deliveryLines, new Map(), { keyOf: unitKey })
-    .map((group) => ({ ...itemFromDeliveries(group), ticket: group.ticket, season: group.season, product: productOf(group.model, modelCodeOf(group.color)) }));
+    .map((group) => ({ ...itemFromDeliveries(group), ticket: group.ticket, po: [...group.pos][0], season: group.season, product: productOf(group.model, modelCodeOf(group.color)) }));
   const pools = new Map();
   const outside = new Map();
   const poolOf = (key) => pools.get(key) || pools.set(key, { ...ZERO(), customer: null, lastReceiptDate: null, actualDeliveryDate: null, receipts: 0 }).get(key);
@@ -331,6 +347,7 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
     const direct = directLot(unit);
     if (direct) {
       add(direct, unit);
+      remember(unit, receiptLines.length ? ['delivered', 'good'] : ['received', 'delivered', 'good']);
       if (unit.actualDeliveryDate && (!direct.actualDeliveryDate || unit.actualDeliveryDate > direct.actualDeliveryDate)) direct.actualDeliveryDate = unit.actualDeliveryDate;
       direct.prints.push(...unit.prints);
       direct.matched.add('phiếu');
@@ -369,6 +386,7 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
     })();
     if (!target) continue;
     target.received += unit.received;
+    remember({ ...unit, po: unit.ticket, delivered: unit.shipped, good: unit.shipped }, deliveryLines.length ? ['received'] : ['received', 'delivered', 'good']);
     if (!deliveryLines.length) {
       target.delivered += unit.shipped;
       target.good += unit.shipped;
@@ -389,13 +407,11 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
       .sort((a, b) => (Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)))
         || String(a.firstDue || '9').localeCompare(String(b.firstDue || '9')));
     if (!targets.length) continue;
-    // A lot matched by ticket in one file keeps that file's figure; goods without a ticket
-    // go to the lots that file did not match. Good follows delivered.
+    // Explicit matches have already reserved quantities. Only fill remaining capacity.
     const fill = (field) => {
-      const source = field === 'good' ? 'delivered' : field;
       const room = (lot) => Math.max(0, lot.contract - lot[field]);
       let left = pool[field];
-      for (const lot of targets.filter((item) => !item.ticketFields.has(source))) {
+      for (const lot of targets) {
         const share = Math.min(left, room(lot));
         lot[field] += share;
         left -= share;
@@ -420,9 +436,15 @@ export function summarizeLots({ bookingRows = [], deliveryLines = [], receiptLin
   for (const lot of lots) {
     for (const field of ['received', 'delivered', 'good']) {
       let left = Math.round(lot[field] || 0);
+      // Reserve explicit PO matches before distributing unidentified quantities.
       for (const row of lot.rows) {
-        const share = Math.min(left, Math.round(Number(row.lineQuantity || 0)));
+        const share = Math.min(left, Number(rowAmounts.get(row)?.[field] || 0));
         row[`${field}Fifo`] = share;
+        left -= share;
+      }
+      for (const row of lot.rows) {
+        const share = Math.min(left, Math.max(0, Number(row.lineQuantity || 0) - row[`${field}Fifo`]));
+        row[`${field}Fifo`] += share;
         left -= share;
       }
     }

@@ -112,3 +112,17 @@ test('reads the daily plan and flags a wrong TỔNG NGÀY', async () => {
   const { dailyTotals } = check(workbook);
   assert.deepEqual(dailyTotals.map((item) => item.note), ['TỔNG NGÀY trong file 999 ≠ tính lại 40 lượt hình']);
 });
+
+test('leadtime-only booking preserves PXI and rejects contradictory return dates', async () => {
+  const {readBooking} = await import('../src/booking-import.js');
+  const sheet = (pxi) => XLSX.utils.aoa_to_sheet([
+    [null,null,null,null,null,null,null,'PXC CHUYỂN',46321],
+    [null,null,null,null,null,null,null,'PXI TRẢ',pxi],
+    [],['LINE','CUS','REF','COLOR','PO','LINE QTY','HÌNH IN'],
+    ['1','C','R','1234567 BLUE','PO',10,1,null,10]
+  ]);
+  const book = {Sheets:{'LEADTIME 1 NGÀY':sheet(46322)}};
+  assert.equal(readBooking(book).days[0].returnDate,'2026-10-27');
+  book.Sheets['LEADTIME 2 NGÀY']=sheet(46323);
+  assert.throws(()=>readBooking(book),/PXI TRẢ khác nhau/);
+});

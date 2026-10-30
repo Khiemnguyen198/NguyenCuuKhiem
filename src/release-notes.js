@@ -2,6 +2,12 @@ import { escapeHtml } from './format.js';
 
 // Bundle notes with their version so they remain accurate and available offline.
 const RELEASE_NOTES = {
+  '0.0.24': [
+    'Ưu tiên PO / số phiếu trước FIFO; tách lô theo mùa.',
+    'Giữ ngày PXI của booking leadtime, báo rõ khi các sheet mâu thuẫn.',
+    'Giữ số lẻ và cập nhật tổng Excel theo dữ liệu chỉnh sửa, bộ lọc.',
+    'Thu gọn lịch và bổ sung mùa, số phiếu để nhận diện lô.'
+  ],
   '0.0.23': [
     'Tính ngày giao dự kiến từ ngày giao BTP thực tế + leadtime + 1 ngày lịch, kể cả Chủ nhật.',
     'Để trống ngày dự kiến khi chưa có ngày giao BTP thực tế.'

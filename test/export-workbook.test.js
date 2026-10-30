@@ -138,3 +138,17 @@ test('old receipt of another PO does not produce actual or expected dates in the
   assert.equal(book.Sheets['CAN DOI'].I5, undefined);
   assert.match(book.Sheets['KE HOACH GIAO HANG'].N2.v, /Chưa xác định ngày nhận BTP/);
 });
+
+test('fractional plans retain precision and totals use filtered formulas and TH references', () => {
+  const rows = [{line:'1',ref:'R',modelCode:'1234567',color:'1234567 BLUE',season:'SS27',po:'P',lineQuantity:10,printCount:2,leadTime:'1 ngày',allocations:{0:0.25,1:0.5}}];
+  const {items} = summarizeLots({bookingRows:rows});
+  const book = buildExportWorkbook({booking:{rows,days:[{date:'2026-10-29'},{date:'2026-10-30'}]},lots:items});
+  const balance=book.Sheets['CAN DOI'];
+  assert.equal(balance.H5.v,0.75);
+  assert.equal(balance.M5.v,-0.75);
+  assert.equal(balance.N5.v,0.25);
+  assert.equal(balance.N5.f,"SUM('TH'!R6)");
+  assert.match(balance.N3.f,/SUBTOTAL\(109/);
+  assert.match(book.Sheets.TH.R4.f,/SUBTOTAL\(109/);
+  assert.equal(book.Sheets.TH.R3.f,'SUM(R4:S4)');
+});

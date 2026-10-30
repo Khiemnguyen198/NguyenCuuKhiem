@@ -238,7 +238,12 @@ function readBookingSheets(workbook) {
     }
     return { ...row, allocations };
   }));
-  return { rows, days: dates.map((date) => ({ date, returnDate: null, fileTotal: null })) };
+  return { rows, days: dates.map((date) => {
+    const sources = parts.flatMap(part => part.days.filter(day => day.date === date));
+    const returns = [...new Set(sources.map(day => day.returnDate).filter(Boolean))];
+    if (returns.length > 1) throw new Error(`Ngày PXC ${date} có ngày PXI TRẢ khác nhau giữa các sheet leadtime: ${returns.join(', ')}. Vui lòng thống nhất ngày PXI trước khi nhập.`);
+    return { date, returnDate: returns[0] || null, fileTotal: null };
+  }) };
 }
 
 export function extractBookingRows(workbook) {

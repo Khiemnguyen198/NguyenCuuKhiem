@@ -307,3 +307,29 @@ test('uses a uniquely matched shipment date from the receiving file only when re
   const primary=makeRows();summarizeLots({bookingRows:primary,receiptLines:[r],deliveryLines:[delivery({po:'PO-A',ticket:'111',delivered:10,good:10,actualDeliveryDate:'2026-10-30'})]});
   assert.equal(primary[0].fileDeliveryDate,'2026-10-30');
 });
+
+test('explicit PO quantities take priority over an earlier PO in the same lot', () => {
+  const rows = [row('EARLY', 100, '2026-11-01'), row('LATE', 100, '2026-11-05')];
+  summarizeLots({ bookingRows: rows, receiptLines: [{model:'353234', color:'9046670', season:'SS27', po:'LATE', received:60, date:'2026-10-28'}], deliveryLines: [delivery({po:'LATE', received:60, delivered:40, good:38})] });
+  assert.deepEqual(rows.map(r => [r.receivedFifo, r.deliveredFifo, r.goodFifo]), [[0,0,0],[60,40,38]]);
+  assert.equal(rows[0].receiptDate, null);
+  assert.equal(rows[1].receiptDate, '2026-10-28');
+});
+
+test('same ticket and product in different seasons remain separate and match their season', () => {
+  const rows = [row('SUMMER',100,'2026-11-01',{ticketNumber:'123'}),row('WINTER',100,'2026-11-02',{ticketNumber:'123',season:'FW27'})];
+  const {items} = summarizeLots({bookingRows:rows,deliveryLines:[delivery({ticket:'123',season:'FW27',received:60,delivered:50,good:50})]});
+  assert.equal(items.length,2);
+  assert.deepEqual(rows.map(r=>r.goodFifo),[0,50]);
+});
+
+test('PO matching bypasses earlier lots and reduces each PO to its slowest print', () => {
+  const rows = [row('EARLY',100,'2026-11-01'),row('LATE',100,'2026-11-05',{inputDate:'2026-10-25'})];
+  const {items}=summarizeLots({bookingRows:rows,deliveryLines:[
+    delivery({po:'LATE-OB',fullPo:'LATE',print:'OB',received:70,delivered:60,good:58}),
+    delivery({po:'LATE-TB',fullPo:'LATE',print:'TB',received:70,delivered:50,good:49}),
+    delivery({po:'',received:10,delivered:10,good:10})
+  ]});
+  assert.deepEqual(rows.map(r=>r.goodFifo),[10,49]);
+  assert.equal(items.reduce((sum,item)=>sum+item.good,0),59);
+});

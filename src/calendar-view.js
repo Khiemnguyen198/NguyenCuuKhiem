@@ -66,10 +66,10 @@ const SHORT_WEEKDAYS = { CN: 'CN', 'Thứ 2': 'T2', 'Thứ 3': 'T3', 'Thứ 4': 
 // Compact week grid: days with no order shrink to a narrow column, orders are grouped by the
 // day they start, each line is one order with its region and a flag on the due date.
 export function renderCalendar({ columns, orders, shownOrders, selectedDate = null, today = null }) {
-  const totals = columns.map((_, column) => orders.reduce((sum, order) => sum + order.cells[column], 0));
-  const counts = columns.map((_, column) => orders.filter((order) => order.cells[column] > 0).length);
-  const busy = columns.map((_, column) => counts[column] > 0 || orders.some((order) => order.due === column));
-  const template = `200px ${busy.map((used) => (used ? 'minmax(84px, 1fr)' : '46px')).join(' ')}`;
+  const totals = columns.map((_, column) => shownOrders.reduce((sum, order) => sum + order.cells[column], 0));
+  const counts = columns.map((_, column) => shownOrders.filter((order) => order.cells[column] > 0).length);
+  const busy = columns.map((_, column) => counts[column] > 0 || shownOrders.some((order) => order.due === column));
+  const template = `180px ${busy.map((used) => (used ? 'minmax(76px, 1fr)' : '42px')).join(' ')}`;
   const dayClass = (column, prefix) => `${column.sunday ? ` ${prefix}--sunday` : ''}${column.date === today ? ` ${prefix}--today` : ''}${column.date === selectedDate ? ` ${prefix}--selected` : ''}`;
   const head = columns.map((column, position) => busy[position]
     ? `<${column.index == null ? 'div' : `button type="button" data-cal-day="${column.index}" aria-pressed="${column.date === selectedDate}"`} class="cal-day${dayClass(column, 'cal-day')}" title="${column.index == null ? '' : column.date === selectedDate ? 'Bấm để xem cả tuần' : 'Bấm để lọc theo ngày này'}">
@@ -96,7 +96,7 @@ export function renderCalendar({ columns, orders, shownOrders, selectedDate = nu
       : '';
     const color = colorName(item.color) || '';
     lines.push(`<div class="cal-row">${backdrop}
-      <button type="button" class="cal-label" data-order="${escapeHtml(item.key)}" title="${escapeHtml(`${item.customer} · ${item.model} · ${item.modelCode} · ${color}`)}"><strong>${escapeHtml(item.model || '—')}</strong><small>${escapeHtml(color || item.modelCode || '')}</small></button>
+      <button type="button" class="cal-label" data-order="${escapeHtml(item.key)}" title="${escapeHtml(`${item.customer} · ${item.model} · ${item.modelCode} · ${color}`)}"><strong>${escapeHtml(item.model || '—')}</strong><small>${escapeHtml([color || item.modelCode, item.season, item.ticket ? `#${item.ticket}` : null].filter(Boolean).join(' · '))}</small></button>
       <button type="button" class="cal-bar cal-bar--${tone(item)}" style="grid-column:${start + 2} / ${end + 3}" data-order="${escapeHtml(item.key)}" title="${escapeHtml(`${item.model} · ${STATUS_COPY[item.status].label} · ${number(item.contract)} sp · hạn ${shortDate(item.dueDate)}`)}">${segments}</button>
       ${dueMarker}
     </div>`);
