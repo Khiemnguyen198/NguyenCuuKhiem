@@ -46,20 +46,23 @@ test('flags a day plan that does not add up to LINE QTY', () => {
   assert.match(issues[0].reason, /J 26\/10: 30 \+ K 27\/10: 40 = 70; LINE QTY 100 — còn thiếu 30/);
 });
 
-test('the export holds TH with computed totals and CAN DOI per lot', () => {
+test('the export holds TH with computed totals and CAN_DOI per group', () => {
   const book = workbook();
   const { rows, days } = readBooking(book);
   const sheetCheck = { checked: true, mismatches: [], cells: checkBookingSheet(book) };
   const out = buildExportWorkbook({ booking: { rows, days }, lots: summarizeLots({ bookingRows: rows }).items, sheetCheck });
-  assert.deepEqual(out.SheetNames, ['KE HOACH GIAO HANG', 'TH', 'CAN DOI']);
+  assert.deepEqual(out.SheetNames, ['KE HOACH GIAO HANG', 'TH', 'CAN_DOI']);
   const th = out.Sheets.TH;
   assert.deepEqual([th.M6.v, th.M7.v, th.S4.v], [150, 150, 50], 'SLHĐ TỔNG is the lot total, TỔNG NGÀY recomputed');
   assert.match(th.R2.c[0].t, /sai năm/);
   assert.equal(new Date(Date.UTC(1899, 11, 30) + th.R2.v * 86_400_000).toISOString().slice(0, 10), '2026-10-26');
-  // Like the planners' sheet, CAN DOI starts at row 3 (totals), header on row 4.
-  const canDoi = XLSX.utils.sheet_to_json(out.Sheets['CAN DOI'], { header: 1, defval: null, raw: true, blankrows: true });
-  assert.equal(out.Sheets['CAN DOI']['!ref'].split(':')[0], 'A3');
-  assert.deepEqual(canDoi[1].slice(1, 13), ['REF', 'MODEL CODE', 'Mùa', 'SLHĐ TỔNG', 'HÌNH IN', ' Leadtime ', 'W43', 'Ngày nhận', 'Thực Nhận', 'Đã In', 'Đã Giao', 'GAP']);
-  assert.deepEqual(canDoi[2].slice(0, 8), ['3532349046670150', '353234', '9046670', 'SS27', 150, 1, '1 ngày', 150]);
-  assert.equal(out.Sheets['CAN DOI'].H5.f, 'SUM(N5:O5)');
+  // Like the planners' sheet, CAN_DOI starts at row 3 (totals), header on row 4.
+  const canDoi = XLSX.utils.sheet_to_json(out.Sheets['CAN_DOI'], { header: 1, defval: null, raw: true, blankrows: true });
+  assert.equal(out.Sheets['CAN_DOI']['!ref'].split(':')[0], 'A3');
+  assert.deepEqual(canDoi[1].slice(1, 15), ['REF', 'MODEL CODE', 'SỐ PHIẾU', 'Mùa', 'SLHĐ TỔNG', 'HÌNH IN', '', 'Leadtime', 'W43', 'Ngày nhận', 'Thực Nhận', 'Đã In', 'Đã Giao', 'GAP']);
+  // Grouped by the booking's own SLHĐ TỔNG like the planners' pivot: empty (shown as the lot total) and 999 stay apart.
+  assert.deepEqual(canDoi[2].slice(0, 10), ['3532349046670150', 353234, 9046670, 73611, 'SS27', 150, 1, 7, '1 ngày', 100]);
+  assert.deepEqual(canDoi[3].slice(0, 10), ['3532349046670999', 353234, 9046670, 73611, 'SS27', 999, 1, 1, '1 ngày', 50]);
+  assert.equal(out.Sheets['CAN_DOI'].A5.f, 'B5&C5&F5');
+  assert.equal(out.Sheets['CAN_DOI'].J5.f, 'SUM(P5:Q5)');
 });

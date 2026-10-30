@@ -17,7 +17,7 @@ test('exports the booking in the customer TH layout', () => {
   const booking = { filename: 'b.xlsx', rows, days };
   const { items } = summarizeLots({ bookingRows: rows });
   const workbook = buildExportWorkbook({ booking, lots: items });
-  assert.deepEqual(workbook.SheetNames, ['KE HOACH GIAO HANG', 'TH', 'CAN DOI']);
+  assert.deepEqual(workbook.SheetNames, ['KE HOACH GIAO HANG', 'TH', 'CAN_DOI']);
   const deliveryPlan = XLSX.utils.sheet_to_json(workbook.Sheets['KE HOACH GIAO HANG'], { header: 1, defval: null, raw: true });
   assert.deepEqual(deliveryPlan[0].slice(0, 11), ['MÃ HÀNG', 'MÀU', 'PO', 'SS', 'SLHĐ', 'SLHĐ TỔNG', 'SL BTP NHẬN', 'LEADTIME', 'NGÀY NHẬN BTP (BOOKING)', 'NGÀY GIAO BTP (BOOKING)', 'NGÀY NHẬN BTP THỰC TẾ']);
   // SheetJS 0.20 converts date-formatted numbers to Date in sheet_to_json,
@@ -63,9 +63,9 @@ test('serialized exports preserve numeric calendar dates, row offsets and formul
   assert.deepEqual({ t: date.t, v: date.v, z: date.z }, { t: 'n', v: 46325, z: 'dd/mm/yyyy' });
   assert.equal(serialized.Sheets.TH.I6.v, 46324);
   assert.equal(serialized.Sheets.TH.J6.v, 46325);
-  assert.equal(serialized.Sheets['CAN DOI']['!ref'].split(':')[0], 'A3');
-  assert.equal(serialized.Sheets['CAN DOI'].H5.f, 'SUM(N5:N5)');
-  assert.equal(serialized.Sheets['CAN DOI'].H5.v, 10);
+  assert.equal(serialized.Sheets['CAN_DOI']['!ref'].split(':')[0], 'A3');
+  assert.equal(serialized.Sheets['CAN_DOI'].J5.f, 'SUM(P5:P5)');
+  assert.equal(serialized.Sheets['CAN_DOI'].J5.v, 10);
   assert.equal(serialized.Sheets['KE HOACH GIAO HANG'].A2.v, 'R1');
 });
 
@@ -99,8 +99,8 @@ test('formatted download preserves data, cached formulas, filters and styles', a
   assert.equal(result.Sheets['KE HOACH GIAO HANG'].I2.v, 46324);
   assert.equal(result.Sheets['KE HOACH GIAO HANG'].J2.v, 46325);
   assert.equal(result.Sheets['KE HOACH GIAO HANG'].J2.z, 'dd/mm/yyyy');
-  assert.equal(result.Sheets['CAN DOI'].H5.f, 'SUM(N5:O5)');
-  assert.equal(result.Sheets['CAN DOI'].H5.v, 10);
+  assert.equal(result.Sheets['CAN_DOI'].J5.f, 'SUM(P5:Q5)');
+  assert.equal(result.Sheets['CAN_DOI'].J5.v, 10);
   assert.equal(result.Sheets.TH.R2.c[0].t, 'Kiểm tra ngày');
   assert.equal(result.Sheets.TH['!autofilter'].ref, input.Sheets.TH['!autofilter'].ref);
   assert.deepEqual(result.Sheets.TH['!merges'], input.Sheets.TH['!merges']);
@@ -135,7 +135,7 @@ test('old receipt of another PO does not produce actual or expected dates in the
   const book = buildExportWorkbook({ booking:{ rows, days:[] }, lots:items });
   assert.equal(book.Sheets['KE HOACH GIAO HANG'].K2, undefined);
   assert.equal(book.Sheets['KE HOACH GIAO HANG'].M2, undefined);
-  assert.equal(book.Sheets['CAN DOI'].I5, undefined);
+  assert.equal(book.Sheets['CAN_DOI'].K5, undefined);
   assert.match(book.Sheets['KE HOACH GIAO HANG'].N2.v, /Chưa xác định ngày nhận BTP/);
 });
 
@@ -143,12 +143,37 @@ test('fractional plans retain precision and totals use filtered formulas and TH 
   const rows = [{line:'1',ref:'R',modelCode:'1234567',color:'1234567 BLUE',season:'SS27',po:'P',lineQuantity:10,printCount:2,leadTime:'1 ngày',allocations:{0:0.25,1:0.5}}];
   const {items} = summarizeLots({bookingRows:rows});
   const book = buildExportWorkbook({booking:{rows,days:[{date:'2026-10-29'},{date:'2026-10-30'}]},lots:items});
-  const balance=book.Sheets['CAN DOI'];
-  assert.equal(balance.H5.v,0.75);
-  assert.equal(balance.M5.v,-0.75);
-  assert.equal(balance.N5.v,0.25);
-  assert.equal(balance.N5.f,"SUM('TH'!R6)");
-  assert.match(balance.N3.f,/SUBTOTAL\(109/);
+  const balance=book.Sheets['CAN_DOI'];
+  assert.equal(balance.J5.v,0.75);
+  assert.equal(balance.O5.v,-0.75);
+  assert.equal(balance.P5.v,0.25);
+  assert.equal(balance.P5.f,"SUM('TH'!R6)");
+  assert.match(balance.P3.f,/SUBTOTAL\(109/);
   assert.match(book.Sheets.TH.R4.f,/SUBTOTAL\(109/);
   assert.equal(book.Sheets.TH.R3.f,'SUM(R4:S4)');
+});
+
+test('CAN_DOI follows the planners\' pivot of the whole booking', () => {
+  const days = [{ date: '2026-10-26' }, { date: '2026-10-27' }, { date: '2026-10-28' }];
+  const base = { line: '87', customer: 'DECATHLON', ref: '307478', color: '8544474BALI', modelCode: '8544474', ticketNumber: '0', printCount: 1, leadTime: '1 ngày' };
+  const all = [
+    // One booking SLHĐ TỔNG (2100) over two seasons, as typed in the file.
+    { ...base, po: 'A', season: 'SS26', lineQuantity: 1020, contractQuantity: 2100, allocations: { 1: 1020 } },
+    { ...base, po: 'B', season: 'SS26', lineQuantity: 420, contractQuantity: 2100, allocations: { 2: 420 } },
+    { ...base, po: 'C', season: 'SS27', lineQuantity: 240, contractQuantity: 2100, allocations: { 2: 240 } },
+    // Planned later: kept with W = 0, nothing filled in.
+    { ...base, po: 'D', season: 'SS27', lineQuantity: 360, contractQuantity: 1200, allocations: {} },
+    { ...base, ref: '349821 BODY', modelCode: '8978894', ticketNumber: '73472', po: 'E', season: 'SS27', lineQuantity: 880, contractQuantity: 4720, allocations: { 0: 732 } }
+  ];
+  const rows = all.filter((row) => Object.keys(row.allocations).length);
+  const { items } = summarizeLots({ bookingRows: rows });
+  const table = XLSX.utils.sheet_to_json(buildExportWorkbook({ booking: { rows, days }, lots: items, allRows: all }).Sheets.CAN_DOI, { header: 1, defval: null, raw: true });
+  const body = table.slice(2).map((row) => row.slice(0, 10));
+  assert.deepEqual(body, [
+    ['30747885444742100', 307478, 8544474, 0, 'SS26', 2100, 1, 2, '1 ngày', 1440],
+    ['30747885444741200', 307478, 8544474, 0, 'SS27', 1200, 1, null, '1 ngày', 0],
+    ['30747885444742100', 307478, 8544474, 0, 'SS27', 2100, 1, 3, '1 ngày', 240],
+    ['349821 BODY89788944720', '349821 BODY', 8978894, 73472, 'SS27', 4720, 1, 1, '1 ngày', 732]
+  ]);
+  assert.ok(table[3].slice(10).every((cell) => cell == null), 'a group outside the range has no receiving figures or days');
 });

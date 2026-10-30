@@ -15,9 +15,9 @@ export async function serializeWorkbook(source) {
   for (const name of source.SheetNames) {
     const input = source.Sheets[name];
     const filter = input['!autofilter']?.ref;
-    const headerRow = name === 'TH' ? 5 : name === 'CAN DOI' ? 4 : filter ? XLSX.utils.decode_range(filter).s.r + 1 : 1;
+    const headerRow = name === 'TH' ? 5 : name === 'CAN_DOI' ? 4 : filter ? XLSX.utils.decode_range(filter).s.r + 1 : 1;
     const sheet = workbook.addWorksheet(name, {
-      views: [{ state: 'frozen', ySplit: headerRow, xSplit: name === 'TH' ? 6 : name === 'CAN DOI' ? 4 : 3 }],
+      views: [{ state: 'frozen', ySplit: headerRow, xSplit: name === 'TH' ? 6 : name === 'CAN_DOI' ? 4 : 3 }],
       pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 }
     });
     (input['!cols'] || []).forEach((column, index) => {
@@ -46,7 +46,7 @@ export async function serializeWorkbook(source) {
         const title = String(item.v || '').toLowerCase();
         if (title.includes('booking') && title.includes('ngày')) cell.fill = solid('FF245A86');
         if (title.includes('thực tế') && title.includes('ngày')) cell.fill = solid('FF217163');
-      } else if ((name === 'CAN DOI' && row === 3) || (name === 'TH' && (row === 3 || row === 4))) {
+      } else if ((name === 'CAN_DOI' && row === 3) || (name === 'TH' && (row === 3 || row === 4))) {
         cell.fill = solid('FFE1F2EB');
         cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF17644E' } };
       } else if (row > headerRow && row % 2 === 0) {

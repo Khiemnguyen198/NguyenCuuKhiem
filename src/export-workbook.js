@@ -169,15 +169,23 @@ function isoWeek(iso) {
   return 1 + Math.round(((date - firstThursday) / 86_400_000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7);
 }
 
-// CAN DOI, as the planners build it from TH: one row per lot (REF · MODEL CODE · Mùa ·
-// SLHĐ TỔNG · HÌNH IN · Leadtime), the week's quantity per day, and the receiving / printing /
-// delivery figures — filled here from the receiving and warehouse files instead of by hand.
+// CAN_DOI, as in the planners' KHSX workbook: the pivot of the whole TH by REF · MODEL CODE ·
+// SỐ PHIẾU · Mùa · SLHĐ TỔNG (the booking's own column) · HÌNH IN · Leadtime, the selected days'
+// quantities, and the receiving / printing / delivery figures — filled here from the receiving
+// and warehouse files instead of by hand. Groups with nothing planned in the range stay (W = 0)
+// so the sheet lines up with the planners' one; the filter on W hides them.
 const CAN_DOI_COLUMNS = [
-  ['', 18], ['REF', 10], ['MODEL CODE', 11], ['Mùa', 7], ['SLHĐ TỔNG', 10], ['HÌNH IN', 8], [' Leadtime ', 9],
+  ['', 18], ['REF', 10], ['MODEL CODE', 11], ['SỐ PHIẾU', 9], ['Mùa', 7], ['SLHĐ TỔNG', 10], ['HÌNH IN', 8],
+  // Unnamed in KHSX: the weekday (Thứ Hai = 1) the group starts printing; planners adjust it.
+  ['', 5], ['Leadtime', 9],
   ['W', 9], ['Ngày nhận', 10], ['Thực Nhận', 10], ['Đã In', 10], ['Đã Giao', 10], ['GAP', 10]
 ];
 
-function canDoiSheet({ booking, lots }) {
+// REF, MODEL CODE and SỐ PHIẾU are numbers in the planners' sheet; "349821 BODY" stays text.
+const idCell = (value) => (/^\d+$/.test(String(value ?? '').trim()) ? Number(value) : value ?? null);
+const canDoiKey = (row) => [row.ref, row.modelCode, row.ticketNumber, row.season, row.contractQuantity, row.printCount, row.leadTime].map((value) => String(value ?? '').trim()).join('|');
+
+function canDoiSheet({ booking, lots, allRows }) {
   const { rows = [] } = booking;
   // Monday–Saturday like the planners' sheet; a Sunday column stays only if something is planned on it.
   const kept = (booking.days || [])
@@ -194,9 +202,14 @@ function canDoiSheet({ booking, lots }) {
     thRows.set(row, thIndex++);
   }
   const groups = new Map();
+  const groupOf = (row) => {
+    const key = canDoiKey(row);
+    if (!groups.has(key)) groups.set(key, { row, days: days.map(() => 0), rows: [], received: 0, delivered: 0, good: 0 });
+    return groups.get(key);
+  };
+  for (const row of allRows || rows) groupOf(row);
   for (const row of rows) {
-    const key = [row.lotKey, row.printCount, row.leadTime].join('|');
-    const group = groups.get(key) || { row, lot: lotsByKey.get(row.lotKey), days: days.map(() => 0), rows: [], received: 0, delivered: 0, good: 0 };
+    const group = groupOf(row);
     kept.forEach(({ index }, position) => {
       const value = row.allocations?.[index];
       if (typeof value === 'number') group.days[position] += value;
@@ -205,11 +218,11 @@ function canDoiSheet({ booking, lots }) {
     group.received += row.receivedFifo || 0;
     group.delivered += row.deliveredFifo || 0;
     group.good += row.goodFifo || 0;
-    groups.set(key, group);
   }
-  const ordered = [...groups.values()].sort((a, b) => String(a.row.ref).localeCompare(String(b.row.ref), 'vi', { numeric: true })
-    || String(a.row.modelCode).localeCompare(String(b.row.modelCode), 'vi', { numeric: true })
-    || String(a.row.season).localeCompare(String(b.row.season)));
+  const compare = (a, b) => String(a ?? '').localeCompare(String(b ?? ''), 'vi', { numeric: true });
+  const ordered = [...groups.values()].sort((a, b) => compare(a.row.ref, b.row.ref) || compare(a.row.modelCode, b.row.modelCode)
+    || compare(a.row.ticketNumber, b.row.ticketNumber) || compare(a.row.season, b.row.season)
+    || compare(a.row.contractQuantity, b.row.contractQuantity) || compare(a.row.printCount, b.row.printCount) || compare(a.row.leadTime, b.row.leadTime));
 
   const first = 4;
   const last = Math.max(first, first + ordered.length - 1);
@@ -217,37 +230,56 @@ function canDoiSheet({ booking, lots }) {
   const letter = (column) => XLSX.utils.encode_col(column);
   const formulaCell = (formula, value, format = '#,##0.##') => ({ t: 'n', v: value, f: formula, z: format });
   const weekLabel = booking.batch?.range ? 'Khoảng ngày' : days.length ? `W${isoWeek(days[0].date)}` : 'W';
-  const header = [...CAN_DOI_COLUMNS.map(([title]) => (title === 'W' ? weekLabel : title)), ...days.map((day) => `Sum of ${viDay(day.date).slice(0, 5)}`)];
-  const sum = (field) => ordered.reduce((total, group) => total + group[field], 0);
-  const column = (name) => CAN_DOI_COLUMNS.findIndex(([title]) => title === name);
+  const titles = CAN_DOI_COLUMNS.map(([title]) => title);
+  const column = (name) => titles.indexOf(name);
+  const col = Object.fromEntries(['REF', 'MODEL CODE', 'SLHĐ TỔNG', 'HÌNH IN', 'W', 'Thực Nhận', 'Đã Giao'].map((name) => [name, letter(column(name))]));
+  const header = [...titles.map((title) => (title === 'W' ? weekLabel : title)), ...days.map((day) => `Sum of ${viDay(day.date).slice(0, 5)}`)];
+  const weekTotal = (group) => group.days.reduce((a, b) => a + b, 0);
+  const planned = ordered.filter((group) => group.rows.length);
+  const sum = (field) => planned.reduce((total, group) => total + group[field], 0);
   const totalsRow = Array(header.length).fill(null);
   for (const name of ['W', 'Thực Nhận', 'Đã In', 'Đã Giao', 'GAP']) {
     const index = column(name);
-    const value = name === 'W' ? ordered.reduce((total, group) => total + group.days.reduce((a, b) => a + b, 0), 0) : name === 'GAP' ? sum('good') - ordered.reduce((total, group) => total + group.days.reduce((a, b) => a + b, 0), 0) : sum({ 'Thực Nhận': 'received', 'Đã In': 'delivered', 'Đã Giao': 'good' }[name]);
+    const allWeek = ordered.reduce((total, group) => total + weekTotal(group), 0);
+    const value = name === 'W' ? allWeek : name === 'GAP' ? sum('good') - planned.reduce((total, group) => total + weekTotal(group), 0) : sum({ 'Thực Nhận': 'received', 'Đã In': 'delivered', 'Đã Giao': 'good' }[name]);
     totalsRow[index] = formulaCell(`SUBTOTAL(109,${letter(index)}${first + 1}:${letter(index)}${last + 1})`, value);
   }
   days.forEach((day, index) => {
     const dayColumn = letter(firstDay + index);
     const load = ordered.reduce((total, group) => total + group.days[index] * (Number(group.row.printCount) || 0), 0);
-    totalsRow[firstDay + index] = formulaCell(`SUMPRODUCT(SUBTOTAL(109,OFFSET(${dayColumn}${first + 1},ROW(${dayColumn}${first + 1}:${dayColumn}${last + 1})-ROW(${dayColumn}${first + 1}),0,1)),$F$${first + 1}:$F$${last + 1})`, load);
+    totalsRow[firstDay + index] = formulaCell(`SUMPRODUCT(SUBTOTAL(109,OFFSET(${dayColumn}${first + 1},ROW(${dayColumn}${first + 1}:${dayColumn}${last + 1})-ROW(${dayColumn}${first + 1}),0,1)),$${col['HÌNH IN']}$${first + 1}:$${col['HÌNH IN']}$${last + 1})`, load);
   });
 
   const table = [[], [], totalsRow, header];
   ordered.forEach((group, offset) => {
     const excelRow = first + offset + 1;
-    const weekTotal = group.days.reduce((a, b) => a + b, 0);
-    const contract = group.lot?.contract ?? group.row.contractQuantity ?? 0;
+    const { row } = group;
+    const total = weekTotal(group);
+    const contract = row.contractQuantity ?? lotsByKey.get(row.lotKey)?.contract ?? 0;
+    const contractValue = Number(contract) || 0;
+    const printCount = Number(row.printCount) || 0;
+    const firstPlanned = group.days.findIndex((value) => value > 0);
+    // Thứ Hai = 1 … Thứ Bảy = 6 (Chủ Nhật = 7), like the planners' column.
+    const weekday = firstPlanned < 0 ? null : ((new Date(`${days[firstPlanned].date}T00:00:00Z`).getUTCDay() + 6) % 7) + 1;
+    const inRange = group.rows.length > 0;
     table.push([
-      `${group.row.ref}${group.row.modelCode}${contract}`,
-      group.row.ref, group.row.modelCode, group.row.season, numberCell(contract), formulaCell(`'TH'!O${thRows.get(group.row)}`, Number(group.row.printCount) || 0, '0'), group.row.leadTime,
-      formulaCell(`SUM(${letter(firstDay)}${excelRow}:${letter(firstDay + Math.max(days.length, 1) - 1)}${excelRow})`, weekTotal),
-      dateCell(confirmedReceiptDate(group.rows), 'dd/mm'),
-      numberCell(Math.round(group.received)), numberCell(Math.round(group.delivered)), numberCell(Math.round(group.good)),
-      formulaCell(`L${excelRow}-H${excelRow}`, group.good - weekTotal),
-      ...group.days.map((value, index) => formulaCell(`SUM(${group.rows.map(row => `'TH'!${letter(17 + kept[index].index)}${thRows.get(row)}`).join(',')})`, value))
+      { t: 's', v: `${row.ref ?? ''}${row.modelCode ?? ''}${contractValue}`, f: `${col.REF}${excelRow}&${col['MODEL CODE']}${excelRow}&${col['SLHĐ TỔNG']}${excelRow}` },
+      idCell(row.ref), idCell(row.modelCode), idCell(row.ticketNumber || 0), row.season, numberCell(contractValue),
+      inRange ? formulaCell(`'TH'!O${thRows.get(group.rows[0])}`, printCount, '0') : numberCell(printCount, '0'),
+      weekday, row.leadTime,
+      formulaCell(`SUM(${letter(firstDay)}${excelRow}:${letter(firstDay + Math.max(days.length, 1) - 1)}${excelRow})`, total),
+      inRange ? dateCell(confirmedReceiptDate(group.rows), 'dd/mm') : null,
+      ...(inRange
+        ? [numberCell(Math.round(group.received)), numberCell(Math.round(group.delivered)), numberCell(Math.round(group.good)),
+          formulaCell(`${col['Đã Giao']}${excelRow}-${col.W}${excelRow}`, group.good - total)]
+        : [null, null, null, null]),
+      ...group.days.map((value, index) => {
+        const cells = group.rows.map((member) => `'TH'!${letter(17 + kept[index].index)}${thRows.get(member)}`);
+        return cells.length ? formulaCell(`SUM(${cells.join(',')})`, value) : null;
+      })
     ]);
   });
-  if (!ordered.length) table.push(['Không có lô nào trong tuần đã chọn.']);
+  if (!ordered.length) table.push(['Không có lô nào trong file booking.']);
   const sheet = XLSX.utils.aoa_to_sheet(table);
   // Keep the planner's used range starting with totals on row 3. Newer
   // SheetJS versions include the leading empty arrays in aoa_to_sheet's range.
@@ -339,11 +371,11 @@ function deliveryPlanSheet({ booking, lots = [] }) {
 }
 
 // The export is what the planners hand over: the new delivery-plan sheet plus the legacy sheets.
-export function buildExportWorkbook({ booking, lots = [], sheetCheck = null }) {
+export function buildExportWorkbook({ booking, lots = [], sheetCheck = null, allRows = null }) {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, deliveryPlanSheet({ booking, lots }), 'KE HOACH GIAO HANG');
   XLSX.utils.book_append_sheet(workbook, thSheet({ booking, lots, sheetCheck }), 'TH');
-  XLSX.utils.book_append_sheet(workbook, canDoiSheet({ booking, lots }), 'CAN DOI');
+  XLSX.utils.book_append_sheet(workbook, canDoiSheet({ booking, lots, allRows }), 'CAN_DOI');
   return workbook;
 }
 
